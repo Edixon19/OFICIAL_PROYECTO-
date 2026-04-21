@@ -2,6 +2,5 @@
 __pycache__/
 *.pyc
 .env
-database.py
 prueba.py
 conexion_mysql.py
