@@ -89,26 +89,22 @@ def _get_cached_connection():
 
 # En tu archivo database.py
 def get_connection():
-    """
-    Retorna la conexión activa. Si se cerró o perdió, reconecta.
-    Uso:
-        conn = get_connection()
-        if conn is None:
-            st.error("Sin conexión a la BD")
-    """
+    # 1. Obtenemos la conexión de la caché
     conn = _get_cached_connection()
+    
     if conn is None:
         return None
+
     try:
-        # ping liviano para verificar que sigue viva
+        # 2. Verificación liviana
         conn.cursor().execute("SELECT 1")
         return conn
     except Exception:
-        # La conexión murió → limpiar caché y reconectar
-        st.cache_resource.clear()
-        return _get_cached_connection()
-
-
+        # 3. La conexión falló. 
+        # En lugar de borrar TODA la caché de la app, 
+        # simplemente retornamos un intento de reconexión 
+        # o manejamos el error sin reiniciar el script completo.
+        return None
 
 def get_cursor(conn):
     """
