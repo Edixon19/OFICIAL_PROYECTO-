@@ -36,19 +36,23 @@ except ImportError:
 # ─────────────────────────────────────────────
 
 def _get_dsn() -> str:
-    # 1. Streamlit Cloud secrets
+    # 1. Intentar Streamlit Cloud secrets
     try:
-        return st.secrets["supabase"]["url"]
-    except Exception:
-        pass
+        dsn = st.secrets["supabase"]["url"]
+        # Imprimir para debug (sin mostrar la contraseña completa)
+        print(f"DEBUG: Cargando desde Secrets. Host: {dsn.split('@')[-1]}")
+        return dsn
+    except Exception as e:
+        print(f"DEBUG: No se pudo leer el secreto: {e}")
 
-    # 2. Variable de entorno (útil con python-dotenv en local)
+    # 2. Variable de entorno
     env_url = os.getenv("DATABASE_URL")
     if env_url:
+        print("DEBUG: Cargando desde env var")
         return env_url
 
-    # 3. Fallback hardcodeado — SOLO DESARROLLO LOCAL
-    #    Reemplaza TU_PASSWORD por tu contraseña real de Supabase.
+    # 3. Fallback
+    print("DEBUG: Usando fallback hardcodeado")
     return (
         "postgresql://postgres:utede2026sem2"
         "@db.wopthjsdceattleaeczt.supabase.co:5432/postgres"
