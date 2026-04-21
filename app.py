@@ -522,36 +522,6 @@ def inject_css() -> None:
         background: var(--bg-card) !important;
         border-color: var(--border-color) !important;
     }}
-    /* FIX: texto "arr" que aparece junto al icono de flecha del expander.
-       Streamlit inyecta un nodo de texto accesible junto al SVG.
-       Se oculta poniendo font-size:0 en el contenedor del icono,
-       pero restaurando el tamano original en el SVG hijo. */
-    [data-testid="stExpanderToggleIcon"] {{
-        font-size: 0 !important;
-        color: transparent !important;
-        overflow: hidden !important;
-        max-width: 24px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-    }}
-    [data-testid="stExpanderToggleIcon"] svg {{
-        width: 16px !important;
-        height: 16px !important;
-        color: var(--expander-header) !important;
-    }}
-    [data-testid="stExpander"] summary > div > div:first-child {{
-        font-size: 0 !important;
-        color: transparent !important;
-        overflow: hidden !important;
-        max-width: 24px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-    }}
-    [data-testid="stExpander"] summary > div > div:first-child svg {{
-        width: 16px !important;
-        height: 16px !important;
-        color: var(--expander-header) !important;
-    }}
 
     /* ── Tabs ── */
     .stTabs [data-baseweb="tab-list"] {{
