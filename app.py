@@ -1,9 +1,8 @@
 """
 GestorPro - Gestor de Tareas con Streamlit + Supabase (PostgreSQL)
 ==================================================================
-Versión 2.0 — Cambios respecto a v1:
+Versión 1.0 — Cambios respecto a v1:
   · Conexión a Supabase (PostgreSQL) en lugar de MySQL/Docker
-  · Sin generación de archivos .json locales
   · FIX sidebar: botón de apertura siempre visible con CSS
   · Modo oscuro sincronizado entre sidebar y Configuración
   · Actividad real desde BD (no hardcodeada)
