@@ -87,25 +87,15 @@ def _get_cached_connection():
         return None
 
 
+# En tu archivo database.py
 def get_connection():
-    """
-    Retorna la conexión activa. Si se cerró o perdió, reconecta.
-    Uso:
-        conn = get_connection()
-        if conn is None:
-            st.error("Sin conexión a la BD")
-    """
-    conn = _get_cached_connection()
-    if conn is None:
-        return None
     try:
-        # ping liviano para verificar que sigue viva
-        conn.cursor().execute("SELECT 1")
-        return conn
-    except Exception:
-        # La conexión murió → limpiar caché y reconectar
-        st.cache_resource.clear()
-        return _get_cached_connection()
+        url = st.secrets["supabase"]["url"]
+        return psycopg2.connect(url)
+    except Exception as e:
+        # Esto hará que el error aparezca en tu app de Streamlit
+        st.error(f"EL ERROR ES: {e}")
+        return None
 
 
 def get_cursor(conn):
