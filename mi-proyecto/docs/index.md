@@ -1,17 +1,10 @@
-# Welcome to MkDocs
+# Bienvenido a mi documentación
 
-For full documentation visit [mkdocs.org](https://www.mkdocs.org).
+Este es el inicio de mi proyecto.  
+Aquí se podrá encontrar:
 
-## Commands
+- ```Los integrantes de esta ejemplo```
+- ```Los códigos usados para la instalación```
+- ```Una guía rápida sobre cómo levantar un entorno virtual y crear su documentación con mkdocs.```
 
-* `mkdocs new [dir-name]` - Create a new project.
-* `mkdocs serve` - Start the live-reloading docs server.
-* `mkdocs build` - Build the documentation site.
-* `mkdocs -h` - Print help message and exit.
-
-## Project layout
-
-    mkdocs.yml    # The configuration file.
-    docs/
-        index.md  # The documentation homepage.
-        ...       # Other markdown pages, images and other files.
+[Ir a la guía](guia.md)

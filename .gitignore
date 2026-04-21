@@ -1,3 +1,5 @@
 .ven/
 __pycache__/
 *.pyc
+.env
+database.py

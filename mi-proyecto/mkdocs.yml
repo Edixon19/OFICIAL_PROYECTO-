@@ -1,1 +1,28 @@
-site_name: My Docs
+site_name: Documentación de mi Proyecto 
+theme:
+  name: material
+  palette:
+    # Modo claro
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Cambiar a modo oscuro
+    # Modo oscuro
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Cambiar a modo claro
+nav:  
+  - Inicio: index.md
+  - Integrantes: integrantes.md
+  - Instalación: instalacion.md
+  - Guia: guia.md
+  
+  
+
