@@ -1,12 +1,13 @@
 """
 GestorPro - Gestor de Tareas con Streamlit + Supabase (PostgreSQL)
 ==================================================================
-Versión 1.0 — Cambios respecto a v1:
-  · Conexión a Supabase (PostgreSQL) en lugar de MySQL/Docker
-  · FIX sidebar: botón de apertura siempre visible con CSS
-  · Modo oscuro sincronizado entre sidebar y Configuración
-  · Actividad real desde BD (no hardcodeada)
-  · Gestión de equipos: crear, agregar/mover/remover miembros, cambiar rol
+Versión 1.1 — Correcciones:
+  · Sidebar FIJO (sin botón de colapsar — se elimina con CSS)
+  · FIX recordatorios: HTML del badge se renderizaba como texto plano
+  · FIX modo claro: textos de toggles, expanders, labels y
+    todos los elementos que quedaban blancos sobre fondo blanco
+  · Colores explícitos en TODOS los textos para que funcionen
+    correctamente en modo claro Y modo oscuro
 
 Autores: GestorPro, equipo del segundo semestre UTEDÉ
 """
@@ -17,11 +18,10 @@ import uuid
 import os
 from datetime import datetime, date
 
-# Importamos nuestra capa de BD (Supabase)
 from database import get_connection, get_cursor, init_db
 
 # ─────────────────────────────────────────────
-# CONFIGURACIÓN INICIAL DE STREAMLIT
+# CONFIGURACIÓN INICIAL
 # ─────────────────────────────────────────────
 st.set_page_config(
     page_title="GestorPro",
@@ -33,10 +33,10 @@ st.set_page_config(
 # ─────────────────────────────────────────────
 # CONSTANTES
 # ─────────────────────────────────────────────
-PRIORITIES    = ["High", "Medium", "Low"]
-CATEGORIES    = ["Trabajo", "Personal", "Compras", "Diseño", "Desarrollo", "Otro"]
+PRIORITIES     = ["High", "Medium", "Low"]
+CATEGORIES     = ["Trabajo", "Personal", "Compras", "Diseño", "Desarrollo", "Otro"]
 STATUS_OPTIONS = ["Pendiente", "Activa", "Completada"]
-TEAM_ROLES    = ["Líder", "Miembro", "Editor", "Viewer"]
+TEAM_ROLES     = ["Líder", "Miembro", "Editor", "Viewer"]
 
 PRIORITY_COLORS = {"High": "#ef4444", "Medium": "#f59e0b", "Low": "#22c55e"}
 CATEGORY_COLORS = {
@@ -44,44 +44,64 @@ CATEGORY_COLORS = {
     "Diseño": "#ec4899", "Desarrollo": "#06b6d4", "Otro": "#6b7280",
 }
 
+# ── Temas ─────────────────────────────────────
+# Nota: todos los colores de texto son EXPLÍCITOS para evitar
+# que hereden valores incorrectos en cada modo.
 THEMES = {
     "light": {
-        "--bg-main": "#f8fafc", "--bg-card": "#ffffff", "--bg-sidebar": "#1a1a2e",
-        "--text-primary": "#0f172a", "--text-secondary": "#64748b",
-        "--text-sidebar": "#e2e8f0", "--border-color": "#e2e8f0",
-        "--accent-primary": "#e55a2b", "--accent-secondary": "#0d9488",
+        "--bg-main":         "#f8fafc",
+        "--bg-card":         "#ffffff",
+        "--bg-sidebar":      "#1a1a2e",
+        "--text-primary":    "#0f172a",
+        "--text-secondary":  "#475569",
+        "--text-sidebar":    "#e2e8f0",
+        "--border-color":    "#e2e8f0",
+        "--accent-primary":  "#e55a2b",
+        "--accent-secondary":"#0d9488",
         "--accent-gradient": "linear-gradient(135deg, #e55a2b, #0d9488)",
-        "--hover-bg": "#f1f5f9", "--input-bg": "#f8fafc",
-        "--shadow": "0 2px 8px rgba(0,0,0,0.08)",
-        "--shadow-hover": "0 4px 16px rgba(0,0,0,0.12)",
-        "--badge-bg": "#f1f5f9", "--completed-text": "#94a3b8",
+        "--hover-bg":        "#f1f5f9",
+        "--input-bg":        "#ffffff",
+        "--input-border":    "#cbd5e1",
+        "--shadow":          "0 2px 8px rgba(0,0,0,0.08)",
+        "--shadow-hover":    "0 4px 16px rgba(0,0,0,0.14)",
+        "--badge-bg":        "#f1f5f9",
+        "--completed-text":  "#94a3b8",
+        "--expander-bg":     "#f8fafc",
+        "--expander-header": "#0f172a",
+        "--toggle-label":    "#0f172a",
+        "--card-meta":       "#475569",
     },
     "dark": {
-        "--bg-main": "#0f172a", "--bg-card": "#1e293b", "--bg-sidebar": "#020617",
-        "--text-primary": "#f1f5f9", "--text-secondary": "#94a3b8",
-        "--text-sidebar": "#e2e8f0", "--border-color": "#334155",
-        "--accent-primary": "#e55a2b", "--accent-secondary": "#0d9488",
+        "--bg-main":         "#0f172a",
+        "--bg-card":         "#1e293b",
+        "--bg-sidebar":      "#020617",
+        "--text-primary":    "#f1f5f9",
+        "--text-secondary":  "#94a3b8",
+        "--text-sidebar":    "#e2e8f0",
+        "--border-color":    "#334155",
+        "--accent-primary":  "#e55a2b",
+        "--accent-secondary":"#0d9488",
         "--accent-gradient": "linear-gradient(135deg, #e55a2b, #0d9488)",
-        "--hover-bg": "#334155", "--input-bg": "#1e293b",
-        "--shadow": "0 2px 8px rgba(0,0,0,0.3)",
-        "--shadow-hover": "0 4px 16px rgba(0,0,0,0.5)",
-        "--badge-bg": "#334155", "--completed-text": "#475569",
+        "--hover-bg":        "#334155",
+        "--input-bg":        "#1e293b",
+        "--input-border":    "#475569",
+        "--shadow":          "0 2px 8px rgba(0,0,0,0.3)",
+        "--shadow-hover":    "0 4px 16px rgba(0,0,0,0.5)",
+        "--badge-bg":        "#334155",
+        "--completed-text":  "#475569",
+        "--expander-bg":     "#1e293b",
+        "--expander-header": "#f1f5f9",
+        "--toggle-label":    "#f1f5f9",
+        "--card-meta":       "#94a3b8",
     },
 }
 
 
 # ══════════════════════════════════════════════
-#  CAPA DE DATOS — Supabase (PostgreSQL)
+#  CAPA DE DATOS — Supabase
 # ══════════════════════════════════════════════
-# Todas las funciones db_* trabajan con psycopg2 + DictCursor.
-# Las filas retornadas son dicts, igual que mysql-connector con dictionary=True.
 
 def _exec(sql: str, params=(), fetch: str = "none"):
-    """
-    Ejecutor genérico: abre cursor, ejecuta, hace commit y retorna filas.
-    fetch: "none" | "one" | "all"
-    Retorna [] / {} / None en caso de error, nunca lanza excepción al caller.
-    """
     conn = get_connection()
     if conn is None:
         return [] if fetch == "all" else ({} if fetch == "one" else None)
@@ -119,7 +139,6 @@ def db_load_tasks() -> list:
         fetch="all",
     )
     for r in rows:
-        # JSONB puede venir como list directamente en psycopg2
         if isinstance(r.get("tags"), str):
             try:
                 r["tags"] = json.loads(r["tags"])
@@ -137,17 +156,11 @@ def db_load_tasks() -> list:
 def db_add_task(title, description, priority, category, status, due_date, assignee, tags) -> bool:
     task_id = str(uuid.uuid4())
     ok = _exec(
-        """INSERT INTO tasks
-           (id, title, description, priority, category, status,
-            due_date, assignee, tags, created_at)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
-        (
-            task_id, title.strip(), description.strip(), priority, category, status,
-            due_date.isoformat() if due_date else date.today().isoformat(),
-            assignee.strip(),
-            json.dumps(tags, ensure_ascii=False),
-            datetime.now().isoformat(),
-        ),
+        """INSERT INTO tasks (id,title,description,priority,category,status,
+           due_date,assignee,tags,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
+        (task_id, title.strip(), description.strip(), priority, category, status,
+         due_date.isoformat() if due_date else date.today().isoformat(),
+         assignee.strip(), json.dumps(tags, ensure_ascii=False), datetime.now().isoformat()),
     )
     if ok:
         _log_activity(assignee.strip() or "Sistema", "creó la tarea", "tarea", title.strip())
@@ -159,16 +172,9 @@ def db_update_task(task_id: str, **kwargs) -> bool:
         kwargs["tags"] = json.dumps(kwargs["tags"], ensure_ascii=False)
     if not kwargs:
         return False
-    # Para JSONB hay que castear en el SET
-    set_parts = []
-    for k in kwargs:
-        if k == "tags":
-            set_parts.append(f"{k} = %s::jsonb")
-        else:
-            set_parts.append(f"{k} = %s")
-    set_clause = ", ".join(set_parts)
-    values = list(kwargs.values()) + [task_id]
-    ok = _exec(f"UPDATE tasks SET {set_clause} WHERE id = %s", values)
+    set_parts = [f"{k} = %s::jsonb" if k == "tags" else f"{k} = %s" for k in kwargs]
+    ok = _exec(f"UPDATE tasks SET {', '.join(set_parts)} WHERE id = %s",
+               list(kwargs.values()) + [task_id])
     if ok:
         _log_activity("Usuario", "actualizó la tarea", "tarea", kwargs.get("title", task_id))
     return bool(ok)
@@ -199,8 +205,7 @@ def db_load_teams() -> list:
             team["created_at"] = team["created_at"].isoformat()
         members = _exec(
             "SELECT * FROM team_members WHERE team_id = %s ORDER BY role",
-            (team["id"],),
-            fetch="all",
+            (team["id"],), fetch="all",
         )
         for m in members:
             if hasattr(m.get("joined_at"), "isoformat"):
@@ -211,24 +216,18 @@ def db_load_teams() -> list:
 
 def db_create_team(name: str, description: str, leader_name: str) -> bool:
     team_id = str(uuid.uuid4())
-    ok = _exec(
-        "INSERT INTO teams (id, name, description) VALUES (%s,%s,%s)",
-        (team_id, name.strip(), description.strip()),
-    )
+    ok = _exec("INSERT INTO teams (id,name,description) VALUES (%s,%s,%s)",
+               (team_id, name.strip(), description.strip()))
     if ok and leader_name.strip():
-        _exec(
-            "INSERT INTO team_members (id, team_id, member_name, role) VALUES (%s,%s,%s,%s)",
-            (str(uuid.uuid4()), team_id, leader_name.strip(), "Líder"),
-        )
+        _exec("INSERT INTO team_members (id,team_id,member_name,role) VALUES (%s,%s,%s,%s)",
+              (str(uuid.uuid4()), team_id, leader_name.strip(), "Líder"))
         _log_activity(leader_name, "creó el equipo", "equipo", name.strip())
     return bool(ok)
 
 
 def db_add_member(team_id: str, member_name: str, role: str, team_name: str = "") -> bool:
-    ok = _exec(
-        "INSERT INTO team_members (id, team_id, member_name, role) VALUES (%s,%s,%s,%s)",
-        (str(uuid.uuid4()), team_id, member_name.strip(), role),
-    )
+    ok = _exec("INSERT INTO team_members (id,team_id,member_name,role) VALUES (%s,%s,%s,%s)",
+               (str(uuid.uuid4()), team_id, member_name.strip(), role))
     if ok:
         _log_activity("Usuario", f"agregó a {member_name} al equipo", "equipo", team_name)
     return bool(ok)
@@ -242,10 +241,8 @@ def db_update_member_role(member_id: str, new_role: str, member_name: str = "") 
 
 
 def db_move_member(member_id: str, new_team_id: str, member_name: str = "", new_team_name: str = "") -> bool:
-    ok = _exec(
-        "UPDATE team_members SET team_id = %s, role = 'Miembro' WHERE id = %s",
-        (new_team_id, member_id),
-    )
+    ok = _exec("UPDATE team_members SET team_id = %s, role = 'Miembro' WHERE id = %s",
+               (new_team_id, member_id))
     if ok:
         _log_activity("Líder", f"movió a {member_name} al equipo", "equipo", new_team_name)
     return bool(ok)
@@ -269,21 +266,14 @@ def db_delete_team(team_id: str, team_name: str = "") -> bool:
 
 def _log_activity(user_name: str, action: str, entity_type: str = "",
                   entity_name: str = "", detail: str = "") -> None:
-    """Registra un evento. Falla silenciosamente para no interrumpir el flujo."""
-    _exec(
-        """INSERT INTO activity_log
-           (id, user_name, action, entity_type, entity_name, detail)
-           VALUES (%s,%s,%s,%s,%s,%s)""",
-        (str(uuid.uuid4()), user_name, action, entity_type, entity_name, detail),
-    )
+    _exec("""INSERT INTO activity_log (id,user_name,action,entity_type,entity_name,detail)
+             VALUES (%s,%s,%s,%s,%s,%s)""",
+          (str(uuid.uuid4()), user_name, action, entity_type, entity_name, detail))
 
 
 def db_load_activity(limit: int = 30) -> list:
-    rows = _exec(
-        "SELECT * FROM activity_log ORDER BY created_at DESC LIMIT %s",
-        (limit,),
-        fetch="all",
-    )
+    rows = _exec("SELECT * FROM activity_log ORDER BY created_at DESC LIMIT %s",
+                 (limit,), fetch="all")
     for r in rows:
         if hasattr(r.get("created_at"), "isoformat"):
             r["created_at"] = r["created_at"].isoformat()
@@ -312,19 +302,14 @@ def _get_sample_tasks() -> list:
 
 
 def seed_sample_data() -> None:
-    """Inserta datos de ejemplo si la tabla tasks está vacía."""
     row = _exec("SELECT COUNT(*) AS cnt FROM tasks", fetch="one")
     if row and int(row.get("cnt", 0)) == 0:
         for t in _get_sample_tasks():
-            _exec(
-                """INSERT INTO tasks
-                   (id,title,description,priority,category,status,
-                    due_date,assignee,tags,created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
-                (t["id"], t["title"], t["description"], t["priority"],
-                 t["category"], t["status"], t["due_date"], t["assignee"],
-                 json.dumps(t["tags"]), t["created_at"]),
-            )
+            _exec("""INSERT INTO tasks (id,title,description,priority,category,status,
+                     due_date,assignee,tags,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
+                  (t["id"], t["title"], t["description"], t["priority"], t["category"],
+                   t["status"], t["due_date"], t["assignee"],
+                   json.dumps(t["tags"]), t["created_at"]))
 
 
 # ══════════════════════════════════════════════
@@ -350,14 +335,12 @@ def init_session_state() -> None:
         if key not in st.session_state:
             st.session_state[key] = val
 
-    # Inicializar BD una sola vez por sesión
     if not st.session_state.db_ok:
         ok = init_db()
         st.session_state.db_ok = ok
         if ok:
             seed_sample_data()
 
-    # Recargar datos frescos en cada rerun (fuente única: Supabase)
     st.session_state.tasks = db_load_tasks()
     st.session_state.teams = db_load_teams()
 
@@ -368,17 +351,27 @@ def init_session_state() -> None:
 
 def inject_css() -> None:
     """
-    Inyecta CSS con las variables del tema activo.
+    CSS global con tres objetivos principales:
 
-    FIX sidebar colapsado:
-    Usamos dos selectores CSS para el botón nativo de Streamlit:
-      · [data-testid="collapsedControl"]  → sidebar cerrado
-      · button[data-testid="collapsedControl"]
-    Lo fijamos en posición absoluta al borde izquierdo con z-index alto
-    para que siempre esté visible aunque el panel esté oculto.
+    1. SIDEBAR FIJO — se elimina el botón de colapsar/expandir con CSS.
+       El sidebar siempre está visible; no hay flecha ni toggle.
+
+    2. COLORES MODO CLARO — todos los textos usan color: var(--text-primary)
+       explícito para que nunca hereden el blanco del tema Streamlit por defecto.
+       Se sobreescriben: expanders, toggles, labels, placeholders, tabs, info boxes.
+
+    3. HTML EN RECORDATORIOS — este bug no es de CSS; se arregló separando
+       el badge HTML en una variable Python antes del f-string principal.
     """
-    theme = THEMES["dark"] if st.session_state.dark_mode else THEMES["light"]
+    theme    = THEMES["dark"] if st.session_state.dark_mode else THEMES["light"]
     css_vars = "\n".join(f"    {k}: {v};" for k, v in theme.items())
+
+    # Color explícito para uso inline en elementos que no leen variables CSS
+    tp  = theme["--text-primary"]
+    ts  = theme["--text-secondary"]
+    bc  = theme["--bg-card"]
+    brd = theme["--border-color"]
+    bg  = theme["--bg-main"]
 
     css = f"""
     <style>
@@ -389,69 +382,92 @@ def inject_css() -> None:
     }}
 
     /* ── Base ── */
-    .stApp {{ background-color: var(--bg-main) !important; font-family: 'Sora', sans-serif !important; }}
+    html, body, .stApp {{
+        background-color: var(--bg-main) !important;
+        font-family: 'Sora', sans-serif !important;
+        color: var(--text-primary) !important;
+    }}
     #MainMenu, footer, header {{ visibility: hidden; }}
     .stDeployButton {{ display: none; }}
 
     /* ══════════════════════════════════════════
-       FIX SIDEBAR — botón de reapertura
-       El selector cubre el estado colapsado Y el expandido.
-       position:fixed lo saca del flujo y lo mantiene visible
-       en la esquina izquierda aunque el sidebar esté cerrado.
+       SIDEBAR FIJO — sin botón de colapsar
+       Se oculta el control de colapsar/expandir
+       para que el sidebar quede permanentemente
+       visible y no haya confusión con la flecha.
     ══════════════════════════════════════════ */
     [data-testid="collapsedControl"],
     button[data-testid="collapsedControl"] {{
-        display:     flex         !important;
-        visibility:  visible      !important;
-        opacity:     1            !important;
-        position:    fixed        !important;
-        left:        0            !important;
-        top:         50%          !important;
-        transform:   translateY(-50%) !important;
-        z-index:     99999        !important;
-        background:  var(--accent-primary) !important;
-        border-radius: 0 10px 10px 0 !important;
-        width:       28px         !important;
-        min-height:  52px         !important;
-        align-items: center       !important;
-        justify-content: center   !important;
-        cursor:      pointer      !important;
-        box-shadow:  3px 0 12px rgba(0,0,0,0.25) !important;
-        border:      none         !important;
-        padding:     0            !important;
-        transition:  width 0.2s   !important;
-    }}
-    [data-testid="collapsedControl"]:hover,
-    button[data-testid="collapsedControl"]:hover {{
-        background: #c94d22 !important;
-        width: 36px !important;
-    }}
-    [data-testid="collapsedControl"] svg,
-    button[data-testid="collapsedControl"] svg {{
-        color: white !important;
-        fill:  white !important;
+        display: none !important;
+        visibility: hidden !important;
     }}
 
-    /* ── Sidebar ── */
     section[data-testid="stSidebar"] {{
         background: var(--bg-sidebar) !important;
-        border-right: 1px solid rgba(255,255,255,0.06);
+        border-right: 1px solid rgba(255,255,255,0.08) !important;
+        min-width: 240px !important;
+        max-width: 280px !important;
     }}
-    section[data-testid="stSidebar"] * {{ color: var(--text-sidebar) !important; }}
+    /* Todos los textos del sidebar en color claro */
+    section[data-testid="stSidebar"],
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] div,
+    section[data-testid="stSidebar"] label {{
+        color: var(--text-sidebar) !important;
+    }}
+    section[data-testid="stSidebar"] .stButton > button {{
+        color: white !important;
+    }}
 
-    /* ── Main ── */
+    /* ── Área principal ── */
     .main .block-container {{
         padding: 1.5rem 2rem !important;
         max-width: 100% !important;
-        background: var(--bg-main);
+        background: var(--bg-main) !important;
     }}
 
-    /* ── Inputs ── */
+    /* ══════════════════════════════════════════
+       COLORES MODO CLARO — corrección global
+       Todos los elementos de texto deben usar
+       var(--text-primary) o var(--text-secondary)
+       explícitamente para evitar herencia de blanco.
+    ══════════════════════════════════════════ */
+
+    /* Párrafos, spans y divs genéricos */
+    .main p, .main span:not(.badge), .main div:not([class*="st"]) {{
+        color: var(--text-primary);
+    }}
+
+    /* Headings */
+    h1, h2, h3, h4, h5, h6 {{
+        color: var(--text-primary) !important;
+        font-family: 'Sora', sans-serif !important;
+        font-weight: 700 !important;
+    }}
+
+    /* Labels de inputs, selectbox, date, radio */
+    .stTextInput > label,
+    .stTextArea > label,
+    .stSelectbox > label,
+    .stDateInput > label,
+    .stNumberInput > label,
+    .stRadio > label,
+    .stCheckbox > label,
+    label[data-testid] {{
+        color: var(--text-primary) !important;
+        font-family: 'Sora', sans-serif !important;
+        font-size: 0.85rem !important;
+        font-weight: 500 !important;
+    }}
+
+    /* Inputs */
     .stTextInput > div > div > input,
     .stTextArea > div > div > textarea,
-    .stSelectbox > div > div > div {{
+    .stSelectbox > div > div > div,
+    .stDateInput > div > div > input {{
         background: var(--input-bg) !important;
-        border: 1.5px solid var(--border-color) !important;
+        border: 1.5px solid var(--input-border) !important;
         border-radius: 10px !important;
         color: var(--text-primary) !important;
         font-family: 'Sora', sans-serif !important;
@@ -462,6 +478,110 @@ def inject_css() -> None:
     .stTextArea > div > div > textarea:focus {{
         border-color: var(--accent-primary) !important;
         box-shadow: 0 0 0 3px rgba(229,90,43,0.15) !important;
+    }}
+    /* Placeholder */
+    .stTextInput > div > div > input::placeholder,
+    .stTextArea > div > div > textarea::placeholder {{
+        color: var(--text-secondary) !important;
+        opacity: 1 !important;
+    }}
+
+    /* ── Toggles — FIX modo claro ── */
+    div[data-testid="stToggle"] > label,
+    div[data-testid="stToggle"] label,
+    div[data-testid="stToggle"] p,
+    div[data-testid="stToggle"] span {{
+        color: var(--toggle-label) !important;
+        font-family: 'Sora', sans-serif !important;
+    }}
+
+    /* ── Expanders — FIX modo claro ── */
+    .streamlit-expanderHeader,
+    [data-testid="stExpander"] summary,
+    [data-testid="stExpander"] summary p,
+    [data-testid="stExpander"] summary span {{
+        background: var(--expander-bg) !important;
+        color: var(--expander-header) !important;
+        font-family: 'Sora', sans-serif !important;
+        font-weight: 600 !important;
+        border-radius: 10px !important;
+    }}
+    [data-testid="stExpander"] > div > div {{
+        background: var(--bg-card) !important;
+        border-color: var(--border-color) !important;
+    }}
+
+    /* ── Tabs — FIX modo claro ── */
+    .stTabs [data-baseweb="tab-list"] {{
+        background: var(--bg-card) !important;
+        border-bottom: 1px solid var(--border-color) !important;
+    }}
+    .stTabs [data-baseweb="tab"] {{
+        color: var(--text-secondary) !important;
+        font-family: 'Sora', sans-serif !important;
+        font-size: 0.84rem !important;
+    }}
+    .stTabs [aria-selected="true"] {{
+        color: var(--accent-primary) !important;
+        border-bottom: 2px solid var(--accent-primary) !important;
+        font-weight: 600 !important;
+    }}
+    .stTabs [data-baseweb="tab-panel"] {{
+        background: var(--bg-card) !important;
+        padding: 1rem !important;
+        border-radius: 0 0 10px 10px !important;
+    }}
+
+    /* ── Info / Warning / Success / Error boxes ── */
+    div[data-testid="stInfo"],
+    div[data-testid="stSuccess"],
+    div[data-testid="stWarning"],
+    div[data-testid="stError"] {{
+        border-radius: 10px !important;
+        font-family: 'Sora', sans-serif !important;
+    }}
+    div[data-testid="stInfo"] p,
+    div[data-testid="stSuccess"] p,
+    div[data-testid="stWarning"] p,
+    div[data-testid="stError"] p {{
+        color: inherit !important;
+    }}
+
+    /* ── Radio horizontal — FIX colores ── */
+    .stRadio > div {{
+        flex-direction: row !important;
+        gap: 0.5rem !important;
+        flex-wrap: wrap !important;
+    }}
+    .stRadio > div > label {{
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 8px !important;
+        padding: 0.35rem 0.85rem !important;
+        cursor: pointer !important;
+        font-family: 'Sora', sans-serif !important;
+        font-size: 0.84rem !important;
+        color: var(--text-primary) !important;
+    }}
+    .stRadio > div > label span {{
+        color: var(--text-primary) !important;
+    }}
+
+    /* ── Selectbox dropdown ── */
+    .stSelectbox [data-baseweb="select"] > div {{
+        background: var(--input-bg) !important;
+        border-color: var(--input-border) !important;
+        color: var(--text-primary) !important;
+    }}
+    [data-baseweb="popover"] [data-baseweb="menu"] {{
+        background: var(--bg-card) !important;
+    }}
+    [data-baseweb="popover"] [role="option"] {{
+        color: var(--text-primary) !important;
+        font-family: 'Sora', sans-serif !important;
+    }}
+    [data-baseweb="popover"] [role="option"]:hover {{
+        background: var(--hover-bg) !important;
     }}
 
     /* ── Botones ── */
@@ -483,166 +603,234 @@ def inject_css() -> None:
         box-shadow: 0 4px 14px rgba(229,90,43,0.35) !important;
     }}
 
-    /* ── Labels ── */
-    .stTextInput label, .stTextArea label,
-    .stSelectbox label, .stDateInput label {{
+    /* ── Download button ── */
+    .stDownloadButton > button {{
+        background: var(--accent-gradient) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px !important;
         font-family: 'Sora', sans-serif !important;
-        font-size: 0.85rem !important;
-        font-weight: 500 !important;
-        color: var(--text-primary) !important;
+        font-weight: 600 !important;
     }}
-
-    /* ── Toggle (modo oscuro) ── */
-    div[data-testid="stToggle"] label {{ color: var(--text-primary) !important; }}
 
     /* ── Cards de stats ── */
     .stat-card {{
-        background: var(--bg-card); border-radius: 14px;
-        padding: 1.25rem 1.5rem; border: 1px solid var(--border-color);
-        box-shadow: var(--shadow); transition: box-shadow 0.2s, transform 0.2s;
+        background: var(--bg-card);
+        border-radius: 14px;
+        padding: 1.25rem 1.5rem;
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow);
+        transition: box-shadow 0.2s, transform 0.2s;
         margin-bottom: 1rem;
     }}
     .stat-card:hover {{ box-shadow: var(--shadow-hover); transform: translateY(-2px); }}
     .stat-card .stat-value {{
-        font-size: 2rem; font-weight: 700; color: var(--text-primary); font-family:'Sora',sans-serif;
+        font-size: 2rem; font-weight: 700;
+        color: var(--text-primary); font-family: 'Sora', sans-serif;
     }}
     .stat-card .stat-label {{
-        font-size: 0.82rem; color: var(--text-secondary); margin-top: 0.25rem; font-family:'Sora',sans-serif;
+        font-size: 0.82rem; color: var(--text-secondary);
+        margin-top: 0.25rem; font-family: 'Sora', sans-serif;
     }}
     .stat-card .stat-delta {{ font-size: 0.78rem; font-weight: 600; margin-top: 0.5rem; }}
     .stat-card .stat-delta.positive {{ color: #22c55e; }}
     .stat-card .stat-delta.negative {{ color: #ef4444; }}
     .stat-icon {{
-        width:42px;height:42px;border-radius:10px;display:flex;
-        align-items:center;justify-content:center;font-size:1.3rem;margin-bottom:0.75rem;
+        width: 42px; height: 42px; border-radius: 10px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.3rem; margin-bottom: 0.75rem;
     }}
 
     /* ── Task cards ── */
     .task-card {{
-        background: var(--bg-card); border-radius: 14px;
-        padding: 1.1rem 1.4rem; border: 1px solid var(--border-color);
-        box-shadow: var(--shadow); margin-bottom: 0.7rem; transition: all 0.2s;
+        background: var(--bg-card);
+        border-radius: 14px;
+        padding: 1.1rem 1.4rem;
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow);
+        margin-bottom: 0.7rem;
+        transition: all 0.2s;
     }}
     .task-card:hover {{ box-shadow: var(--shadow-hover); border-color: rgba(229,90,43,0.3); }}
     .task-card.completed {{ opacity: 0.65; }}
     .task-card .task-title {{
-        font-size:0.98rem;font-weight:600;color:var(--text-primary);
-        font-family:'Sora',sans-serif;margin-bottom:0.2rem;
+        font-size: 0.98rem; font-weight: 600;
+        color: var(--text-primary); font-family: 'Sora', sans-serif; margin-bottom: 0.2rem;
     }}
-    .task-card.completed .task-title {{ text-decoration:line-through;color:var(--completed-text); }}
+    .task-card.completed .task-title {{
+        text-decoration: line-through; color: var(--completed-text);
+    }}
     .task-card .task-desc {{
-        font-size:0.82rem;color:var(--text-secondary);font-family:'Sora',sans-serif;margin-bottom:0.6rem;
+        font-size: 0.82rem; color: var(--text-secondary);
+        font-family: 'Sora', sans-serif; margin-bottom: 0.6rem;
+    }}
+    .task-meta {{
+        font-size: 0.78rem; color: var(--card-meta); font-family: 'Sora', sans-serif;
     }}
 
     /* ── Badges ── */
     .badge {{
-        display:inline-flex;align-items:center;gap:0.25rem;
-        padding:0.18rem 0.65rem;border-radius:100px;
-        font-size:0.72rem;font-weight:600;font-family:'Sora',sans-serif;
-        margin-right:0.3rem;margin-bottom:0.2rem;
+        display: inline-flex; align-items: center; gap: 0.25rem;
+        padding: 0.18rem 0.65rem; border-radius: 100px;
+        font-size: 0.72rem; font-weight: 600; font-family: 'Sora', sans-serif;
+        margin-right: 0.3rem; margin-bottom: 0.2rem;
     }}
-    .badge-priority-high   {{ background:rgba(239,68,68,0.12);color:#ef4444;border:1px solid rgba(239,68,68,0.25); }}
-    .badge-priority-medium {{ background:rgba(245,158,11,0.12);color:#f59e0b;border:1px solid rgba(245,158,11,0.25); }}
-    .badge-priority-low    {{ background:rgba(34,197,94,0.12);color:#22c55e;border:1px solid rgba(34,197,94,0.25); }}
-    .badge-tag             {{ background:var(--badge-bg);color:var(--text-secondary);border:1px solid var(--border-color); }}
-    .badge-status-pendiente  {{ background:rgba(245,158,11,0.12);color:#f59e0b;border:1px solid rgba(245,158,11,0.2); }}
-    .badge-status-activa     {{ background:rgba(13,148,136,0.12);color:#0d9488;border:1px solid rgba(13,148,136,0.25); }}
-    .badge-status-completada {{ background:rgba(34,197,94,0.12);color:#22c55e;border:1px solid rgba(34,197,94,0.2); }}
+    .badge-priority-high   {{ background: rgba(239,68,68,0.12);  color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }}
+    .badge-priority-medium {{ background: rgba(245,158,11,0.12); color: #d97706; border: 1px solid rgba(245,158,11,0.25); }}
+    .badge-priority-low    {{ background: rgba(34,197,94,0.12);  color: #16a34a; border: 1px solid rgba(34,197,94,0.25); }}
+    .badge-tag             {{ background: var(--badge-bg); color: var(--text-secondary); border: 1px solid var(--border-color); }}
+    .badge-status-pendiente  {{ background: rgba(245,158,11,0.12); color: #d97706; border: 1px solid rgba(245,158,11,0.2); }}
+    .badge-status-activa     {{ background: rgba(13,148,136,0.12); color: #0d9488; border: 1px solid rgba(13,148,136,0.25); }}
+    .badge-status-completada {{ background: rgba(34,197,94,0.12);  color: #16a34a; border: 1px solid rgba(34,197,94,0.2); }}
 
     /* ── Tipografía páginas ── */
-    .page-title {{ font-size:1.6rem;font-weight:700;color:var(--text-primary);font-family:'Sora',sans-serif; }}
-    .page-subtitle {{ font-size:0.82rem;color:var(--text-secondary);font-family:'Sora',sans-serif;margin-top:0.1rem; }}
-    .section-title {{ font-size:1.1rem;font-weight:700;color:var(--text-primary);font-family:'Sora',sans-serif;margin-bottom:1rem;margin-top:0.5rem; }}
-    .task-count {{ font-size:0.78rem;color:var(--text-secondary);font-family:'Sora',sans-serif;margin-bottom:0.75rem; }}
+    .page-title {{
+        font-size: 1.6rem; font-weight: 700;
+        color: var(--text-primary); font-family: 'Sora', sans-serif;
+    }}
+    .page-subtitle {{
+        font-size: 0.82rem; color: var(--text-secondary);
+        font-family: 'Sora', sans-serif; margin-top: 0.1rem;
+    }}
+    .section-title {{
+        font-size: 1.1rem; font-weight: 700;
+        color: var(--text-primary); font-family: 'Sora', sans-serif;
+        margin-bottom: 1rem; margin-top: 0.5rem;
+    }}
+    .task-count {{
+        font-size: 0.78rem; color: var(--text-secondary);
+        font-family: 'Sora', sans-serif; margin-bottom: 0.75rem;
+    }}
 
     /* ── Formularios ── */
     .form-container {{
-        background:var(--bg-card);border-radius:16px;padding:1.75rem;
-        border:1px solid var(--border-color);box-shadow:var(--shadow);margin-bottom:1.5rem;
+        background: var(--bg-card); border-radius: 16px; padding: 1.75rem;
+        border: 1px solid var(--border-color); box-shadow: var(--shadow); margin-bottom: 1.5rem;
     }}
     .form-title {{
-        font-size:1.1rem;font-weight:700;color:var(--text-primary);font-family:'Sora',sans-serif;
-        margin-bottom:1.25rem;padding-bottom:0.75rem;border-bottom:1px solid var(--border-color);
+        font-size: 1.1rem; font-weight: 700; color: var(--text-primary);
+        font-family: 'Sora', sans-serif; margin-bottom: 1.25rem;
+        padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color);
     }}
 
     /* ── Confirmación borrado ── */
     .confirm-delete-box {{
-        background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);
-        border-radius:10px;padding:0.75rem 1rem;margin:0.5rem 0;
+        background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3);
+        border-radius: 10px; padding: 0.75rem 1rem; margin: 0.5rem 0;
+        color: var(--text-primary) !important; font-family: 'Sora', sans-serif;
     }}
 
     /* ── Actividad ── */
     .activity-item {{
-        display:flex;align-items:flex-start;gap:0.85rem;
-        padding:0.85rem 0;border-bottom:1px solid var(--border-color);
+        display: flex; align-items: flex-start; gap: 0.85rem;
+        padding: 0.85rem 0; border-bottom: 1px solid var(--border-color);
     }}
-    .activity-item:last-child {{ border-bottom:none; }}
-    .activity-icon {{ width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.9rem;flex-shrink:0; }}
-    .activity-text {{ font-size:0.85rem;color:var(--text-primary);font-family:'Sora',sans-serif;line-height:1.4; }}
-    .activity-time {{ font-size:0.75rem;color:var(--text-secondary);font-family:'Sora',sans-serif;margin-top:0.15rem; }}
+    .activity-item:last-child {{ border-bottom: none; }}
+    .activity-icon {{
+        width: 36px; height: 36px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.9rem; flex-shrink: 0;
+    }}
+    .activity-text {{
+        font-size: 0.85rem; color: var(--text-primary);
+        font-family: 'Sora', sans-serif; line-height: 1.4;
+    }}
+    .activity-time {{
+        font-size: 0.75rem; color: var(--text-secondary);
+        font-family: 'Sora', sans-serif; margin-top: 0.15rem;
+    }}
 
     /* ── Recordatorios ── */
     .reminder-card {{
-        background:var(--bg-card);border-radius:14px;padding:1rem 1.25rem;
-        border:1px solid var(--border-color);box-shadow:var(--shadow);
-        margin-bottom:0.6rem;display:flex;align-items:center;gap:1rem;transition:all 0.2s;
+        background: var(--bg-card); border-radius: 14px; padding: 1rem 1.25rem;
+        border: 1px solid var(--border-color); box-shadow: var(--shadow);
+        margin-bottom: 0.6rem; display: flex; align-items: center;
+        gap: 1rem; transition: all 0.2s;
     }}
-    .reminder-card:hover {{ box-shadow:var(--shadow-hover);transform:translateX(3px); }}
+    .reminder-card:hover {{ box-shadow: var(--shadow-hover); transform: translateX(3px); }}
+    .reminder-title {{
+        font-weight: 600; font-size: 0.9rem;
+        color: var(--text-primary); font-family: 'Sora', sans-serif;
+    }}
+    .reminder-desc {{
+        font-size: 0.78rem; color: var(--text-secondary); font-family: 'Sora', sans-serif;
+    }}
+    .reminder-meta {{
+        margin-top: 0.3rem; font-size: 0.76rem;
+        color: var(--text-secondary); font-family: 'Sora', sans-serif;
+    }}
 
     /* ── Equipos ── */
     .team-card {{
-        background:var(--bg-card);border-radius:14px;padding:1.25rem 1.5rem;
-        border:1px solid var(--border-color);box-shadow:var(--shadow);
-        margin-bottom:1rem;transition:all 0.2s;
+        background: var(--bg-card); border-radius: 14px; padding: 1.25rem 1.5rem;
+        border: 1px solid var(--border-color); box-shadow: var(--shadow);
+        margin-bottom: 1rem; transition: all 0.2s;
     }}
-    .team-card:hover {{ box-shadow:var(--shadow-hover); }}
-
-    /* ── Radio horizontal ── */
-    .stRadio > div {{ flex-direction:row !important;gap:0.5rem !important;flex-wrap:wrap !important; }}
-    .stRadio > div > label {{
-        background:var(--bg-card) !important;border:1px solid var(--border-color) !important;
-        border-radius:8px !important;padding:0.35rem 0.85rem !important;cursor:pointer !important;
-        font-family:'Sora',sans-serif !important;font-size:0.84rem !important;
+    .team-card:hover {{ box-shadow: var(--shadow-hover); }}
+    .team-name {{
+        font-size: 1.1rem; font-weight: 700;
+        color: var(--text-primary); font-family: 'Sora', sans-serif;
+    }}
+    .team-desc {{
+        font-size: 0.8rem; color: var(--text-secondary); font-family: 'Sora', sans-serif;
     }}
 
     /* ── DB status ── */
     .db-status-ok {{
-        font-size:0.72rem;color:#22c55e;font-family:'Sora',sans-serif;
-        display:flex;align-items:center;gap:0.3rem;padding:0.3rem 0.75rem;
-        background:rgba(34,197,94,0.1);border-radius:20px;width:fit-content;margin-bottom:0.75rem;
+        font-size: 0.72rem; color: #16a34a; font-family: 'Sora', sans-serif;
+        display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.75rem;
+        background: rgba(34,197,94,0.15); border-radius: 20px;
+        width: fit-content; margin-bottom: 0.75rem;
     }}
     .db-status-err {{
-        font-size:0.72rem;color:#ef4444;font-family:'Sora',sans-serif;
-        display:flex;align-items:center;gap:0.3rem;padding:0.3rem 0.75rem;
-        background:rgba(239,68,68,0.1);border-radius:20px;width:fit-content;margin-bottom:0.75rem;
+        font-size: 0.72rem; color: #ef4444; font-family: 'Sora', sans-serif;
+        display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.75rem;
+        background: rgba(239,68,68,0.1); border-radius: 20px;
+        width: fit-content; margin-bottom: 0.75rem;
     }}
 
     /* ── Scrollbar ── */
-    ::-webkit-scrollbar {{ width:6px;height:6px; }}
-    ::-webkit-scrollbar-track {{ background:var(--bg-main); }}
-    ::-webkit-scrollbar-thumb {{ background:var(--border-color);border-radius:3px; }}
-    ::-webkit-scrollbar-thumb:hover {{ background:var(--accent-primary); }}
+    ::-webkit-scrollbar {{ width: 6px; height: 6px; }}
+    ::-webkit-scrollbar-track {{ background: var(--bg-main); }}
+    ::-webkit-scrollbar-thumb {{ background: var(--border-color); border-radius: 3px; }}
+    ::-webkit-scrollbar-thumb:hover {{ background: var(--accent-primary); }}
 
     /* ── Sidebar logo ── */
     .sidebar-logo {{
-        display:flex;align-items:center;gap:0.75rem;
-        padding:0.5rem 0 1.5rem 0;
-        border-bottom:1px solid rgba(255,255,255,0.08);margin-bottom:1.25rem;
+        display: flex; align-items: center; gap: 0.75rem;
+        padding: 0.5rem 0 1.5rem 0;
+        border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 1.25rem;
     }}
     .logo-icon {{
-        width:40px;height:40px;background:var(--accent-gradient);border-radius:10px;
-        display:flex;align-items:center;justify-content:center;
-        font-weight:700;font-size:1rem;color:white;font-family:'Sora',sans-serif;
+        width: 40px; height: 40px; background: var(--accent-gradient);
+        border-radius: 10px; display: flex; align-items: center; justify-content: center;
+        font-weight: 700; font-size: 1rem; color: white; font-family: 'Sora', sans-serif;
     }}
-    .logo-text {{ font-size:1.1rem;font-weight:700;color:#f1f5f9;font-family:'Sora',sans-serif; }}
-    .logo-sub  {{ font-size:0.7rem;color:#94a3b8;font-family:'Sora',sans-serif; }}
+    .logo-text {{ font-size: 1.1rem; font-weight: 700; color: #f1f5f9; font-family: 'Sora', sans-serif; }}
+    .logo-sub  {{ font-size: 0.7rem; color: #94a3b8; font-family: 'Sora', sans-serif; }}
+
+    /* ── Configuración — colores modo claro ── */
+    .config-label {{
+        font-size: 0.85rem; font-weight: 500;
+        color: var(--text-primary); font-family: 'Sora', sans-serif;
+        margin-bottom: 0.25rem;
+    }}
+    .config-hint {{
+        font-size: 0.8rem; color: var(--text-secondary);
+        font-family: 'Sora', sans-serif; margin-top: 0.5rem;
+    }}
+    .config-info {{
+        font-family: 'Sora', sans-serif; font-size: 0.85rem;
+        color: var(--text-primary); line-height: 1.7;
+    }}
+    .config-info b {{ color: var(--text-primary); }}
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════
-#  HELPERS CRUD (session state + BD)
+#  HELPERS CRUD
 # ══════════════════════════════════════════════
 
 def add_task(title, description, priority, category, status, due_date, assignee, tags):
@@ -666,7 +854,7 @@ def toggle_task_status(task_id, current_status, title=""):
 
 
 def get_filtered_tasks(status_filter="Todas", category_filter="Todas", search="") -> list:
-    prio = {"High": 0, "Medium": 1, "Low": 2}
+    prio  = {"High": 0, "Medium": 1, "Low": 2}
     tasks = st.session_state.tasks.copy()
     if status_filter != "Todas":
         tasks = [t for t in tasks if t["status"] == status_filter]
@@ -681,15 +869,14 @@ def get_filtered_tasks(status_filter="Todas", category_filter="Todas", search=""
 
 
 def get_stats() -> dict:
-    tasks = st.session_state.tasks
-    total = len(tasks)
+    tasks     = st.session_state.tasks
+    total     = len(tasks)
     completed = sum(1 for t in tasks if t["status"] == "Completada")
     pending   = sum(1 for t in tasks if t["status"] == "Pendiente")
     active    = sum(1 for t in tasks if t["status"] == "Activa")
-    return {
-        "total": total, "completed": completed, "pending": pending, "active": active,
-        "completion_rate": round(completed / total * 100) if total else 0,
-    }
+    return {"total": total, "completed": completed, "pending": pending,
+            "active": active,
+            "completion_rate": round(completed / total * 100) if total else 0}
 
 
 # ══════════════════════════════════════════════
@@ -698,12 +885,14 @@ def get_stats() -> dict:
 
 def render_priority_badge(priority: str) -> str:
     icons = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}
-    return f'<span class="badge badge-priority-{priority.lower()}">{icons.get(priority,"⚪")} {priority}</span>'
+    return (f'<span class="badge badge-priority-{priority.lower()}">'
+            f'{icons.get(priority,"⚪")} {priority}</span>')
 
 
 def render_status_badge(status: str) -> str:
     icons = {"Pendiente": "⏳", "Activa": "🔵", "Completada": "✅"}
-    return f'<span class="badge badge-status-{status.lower()}">{icons.get(status,"")} {status}</span>'
+    return (f'<span class="badge badge-status-{status.lower()}">'
+            f'{icons.get(status,"")} {status}</span>')
 
 
 def render_tag_badge(tag: str) -> str:
@@ -712,7 +901,7 @@ def render_tag_badge(tag: str) -> str:
 
 def render_role_badge(role: str) -> str:
     colors = {"Líder": "#e55a2b", "Editor": "#0d9488", "Viewer": "#6b7280", "Miembro": "#3b82f6"}
-    color = colors.get(role, "#6b7280")
+    color  = colors.get(role, "#6b7280")
     return (f'<span class="badge" style="background:rgba(0,0,0,0.06);'
             f'color:{color};border:1px solid {color}40;">{role}</span>')
 
@@ -727,7 +916,7 @@ def _hex_to_rgb(hex_color: str):
 
 def _time_ago(created_at_str: str) -> str:
     try:
-        dt = datetime.fromisoformat(str(created_at_str)[:19])
+        dt   = datetime.fromisoformat(str(created_at_str)[:19])
         diff = int((datetime.now() - dt).total_seconds())
         if diff < 60:    return f"Hace {diff} seg"
         if diff < 3600:  return f"Hace {diff//60} min"
@@ -753,9 +942,7 @@ def render_task_card(task: dict) -> None:
             {render_priority_badge(task['priority'])}{render_status_badge(task['status'])}
         </div>
         <div style="margin-bottom:0.3rem;">{tags_html}</div>
-        <div style="font-size:0.78rem;color:var(--text-secondary);font-family:'Sora',sans-serif;">
-            {meta_html}
-        </div>
+        <div class="task-meta">{meta_html}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -801,25 +988,26 @@ def render_edit_form(task: dict) -> None:
                 unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
-        nt = st.text_input("Título *", value=task["title"], key=f"edit_title_{task['id']}")
-        nd = st.text_area("Descripción", value=task.get("description",""), key=f"edit_desc_{task['id']}", height=80)
-        na = st.text_input("Asignado a", value=task.get("assignee",""), key=f"edit_assignee_{task['id']}")
+        nt   = st.text_input("Título *", value=task["title"], key=f"edit_title_{task['id']}")
+        nd   = st.text_area("Descripción", value=task.get("description",""),
+                             key=f"edit_desc_{task['id']}", height=80)
+        na   = st.text_input("Asignado a", value=task.get("assignee",""),
+                              key=f"edit_assignee_{task['id']}")
     with c2:
-        np_ = st.selectbox("Prioridad", PRIORITIES,
-                            index=PRIORITIES.index(task["priority"]) if task["priority"] in PRIORITIES else 0,
-                            key=f"edit_priority_{task['id']}")
-        nc  = st.selectbox("Categoría", CATEGORIES,
-                            index=CATEGORIES.index(task["category"]) if task["category"] in CATEGORIES else 0,
-                            key=f"edit_category_{task['id']}")
-        ns  = st.selectbox("Estado", STATUS_OPTIONS,
-                            index=STATUS_OPTIONS.index(task["status"]) if task["status"] in STATUS_OPTIONS else 0,
-                            key=f"edit_status_{task['id']}")
+        np_  = st.selectbox("Prioridad", PRIORITIES,
+                             index=PRIORITIES.index(task["priority"]) if task["priority"] in PRIORITIES else 0,
+                             key=f"edit_priority_{task['id']}")
+        nc   = st.selectbox("Categoría", CATEGORIES,
+                             index=CATEGORIES.index(task["category"]) if task["category"] in CATEGORIES else 0,
+                             key=f"edit_category_{task['id']}")
+        ns   = st.selectbox("Estado", STATUS_OPTIONS,
+                             index=STATUS_OPTIONS.index(task["status"]) if task["status"] in STATUS_OPTIONS else 0,
+                             key=f"edit_status_{task['id']}")
         try:
             cur_date = date.fromisoformat(task.get("due_date","")) if task.get("due_date") else date.today()
         except (ValueError, TypeError):
             cur_date = date.today()
         ndate = st.date_input("Fecha límite", value=cur_date, key=f"edit_date_{task['id']}")
-
     tags_str = st.text_input("Etiquetas (coma)", value=", ".join(task.get("tags",[])),
                               key=f"edit_tags_{task['id']}")
     cs, cc = st.columns([1, 3])
@@ -848,8 +1036,10 @@ def render_new_task_form() -> None:
     c1, c2 = st.columns(2)
     with c1:
         title    = st.text_input("Título *", placeholder="¿Qué necesitas hacer?", key="new_title")
-        desc     = st.text_area("Descripción", placeholder="Añade más detalles...", key="new_desc", height=90)
-        assignee = st.text_input("Asignado a", placeholder="Nombre del responsable", key="new_assignee")
+        desc     = st.text_area("Descripción", placeholder="Añade más detalles...",
+                                 key="new_desc", height=90)
+        assignee = st.text_input("Asignado a", placeholder="Nombre del responsable",
+                                  key="new_assignee")
     with c2:
         priority = st.selectbox("Prioridad", PRIORITIES, key="new_priority")
         category = st.selectbox("Categoría", CATEGORIES, key="new_category")
@@ -903,7 +1093,7 @@ def render_sidebar() -> None:
             ("👥","Equipo"),    ("🔔","Recordatorios"), ("⚡","Actividad"),
         ]:
             if st.button(f"{icon}  {page}", key=f"nav_{page}", use_container_width=True):
-                st.session_state.active_page = page
+                st.session_state.active_page        = page
                 st.session_state.show_new_task_form = False
                 st.session_state.show_new_team_form = False
                 st.session_state.editing_task_id    = None
@@ -916,8 +1106,6 @@ def render_sidebar() -> None:
                     unsafe_allow_html=True)
 
         # Toggle modo oscuro — sidebar
-        # Usamos key distinta a la de Configuración para no tener conflicto de widgets.
-        # Ambos escriben directamente a st.session_state.dark_mode y llaman st.rerun().
         dark = st.toggle("🌙  Modo Oscuro", value=st.session_state.dark_mode, key="sidebar_dark_toggle")
         if dark != st.session_state.dark_mode:
             st.session_state.dark_mode = dark
@@ -933,8 +1121,7 @@ def render_sidebar() -> None:
                     padding:1rem;border:1px solid rgba(255,255,255,0.07);">
             <div style="font-size:0.75rem;color:#94a3b8;font-family:'Sora',sans-serif;
                         margin-bottom:0.6rem;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;">
-                Resumen Rápido
-            </div>
+                Resumen Rápido</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
                 <div style="text-align:center;">
                     <div style="font-size:1.4rem;font-weight:700;color:#f1f5f9;font-family:'Sora',sans-serif;">{stats['total']}</div>
@@ -962,21 +1149,24 @@ def render_sidebar() -> None:
 # ══════════════════════════════════════════════
 
 def render_dashboard() -> None:
-    st.markdown("""
+    tp = THEMES["dark"]["--text-primary"] if st.session_state.dark_mode else THEMES["light"]["--text-primary"]
+    ts = THEMES["dark"]["--text-secondary"] if st.session_state.dark_mode else THEMES["light"]["--text-secondary"]
+
+    st.markdown(f"""
     <div style="margin-bottom:1.5rem;">
-        <div style="font-size:1.5rem;font-weight:700;color:var(--text-primary);font-family:'Sora',sans-serif;">
+        <div style="font-size:1.5rem;font-weight:700;color:{tp};font-family:'Sora',sans-serif;">
             Resumen de Productividad</div>
-        <div style="font-size:0.8rem;color:var(--text-secondary);font-family:'Sora',sans-serif;">
+        <div style="font-size:0.8rem;color:{ts};font-family:'Sora',sans-serif;">
             Actualizado en tiempo real desde Supabase</div>
     </div>
     """, unsafe_allow_html=True)
 
-    qa_col1, qa_col2, qa_col3, qa_col4 = st.columns(4)
+    qa1, qa2, qa3, qa4 = st.columns(4)
     for col, emoji, bg, label, sub in [
-        (qa_col1,"🟠","#fff3ee","Nueva Tarea","Crear tarea rápida"),
-        (qa_col2,"🟢","#eefbf7","Vista Rápida","Tareas urgentes"),
-        (qa_col3,"🟡","#fffbea","Invitar Equipo","Agregar miembros"),
-        (qa_col4,"🔵","#eef4ff","Nuevo Equipo","Iniciar equipo"),
+        (qa1,"🟠","#fff3ee","Nueva Tarea","Crear tarea rápida"),
+        (qa2,"🟢","#eefbf7","Vista Rápida","Tareas urgentes"),
+        (qa3,"🟡","#fffbea","Invitar Equipo","Agregar miembros"),
+        (qa4,"🔵","#eef4ff","Nuevo Equipo","Iniciar equipo"),
     ]:
         with col:
             st.markdown(f"""
@@ -991,14 +1181,14 @@ def render_dashboard() -> None:
             </div>
             """, unsafe_allow_html=True)
 
-    with qa_col1:
+    with qa1:
         if st.button("+ Crear tarea", key="dash_new_task", use_container_width=True):
-            st.session_state.active_page = "Tareas"
+            st.session_state.active_page        = "Tareas"
             st.session_state.show_new_task_form = True
             st.rerun()
-    with qa_col4:
+    with qa4:
         if st.button("+ Crear equipo", key="dash_new_team", use_container_width=True):
-            st.session_state.active_page = "Equipo"
+            st.session_state.active_page        = "Equipo"
             st.session_state.show_new_team_form = True
             st.rerun()
 
@@ -1027,7 +1217,7 @@ def render_dashboard() -> None:
         st.markdown('<div class="section-title">📈 Tareas por Categoría</div>', unsafe_allow_html=True)
         counts = {}
         for t in st.session_state.tasks:
-            counts[t.get("category","Otro")] = counts.get(t.get("category","Otro"),0)+1
+            counts[t.get("category","Otro")] = counts.get(t.get("category","Otro"), 0) + 1
         if counts:
             import pandas as pd
             st.bar_chart(
@@ -1040,11 +1230,11 @@ def render_dashboard() -> None:
         st.markdown('<div class="section-title">🍩 Distribución por Estado</div>', unsafe_allow_html=True)
         total = stats["total"] or 1
         for st_name, count, color in [
-            ("Completada",stats["completed"],"#22c55e"),
-            ("Activa",stats["active"],"#0d9488"),
-            ("Pendiente",stats["pending"],"#f59e0b"),
+            ("Completada", stats["completed"], "#22c55e"),
+            ("Activa",     stats["active"],    "#0d9488"),
+            ("Pendiente",  stats["pending"],   "#f59e0b"),
         ]:
-            pct = round(count/total*100)
+            pct = round(count / total * 100)
             st.markdown(f"""
             <div style="margin-bottom:0.6rem;">
                 <div style="display:flex;justify-content:space-between;font-size:0.82rem;
@@ -1057,7 +1247,6 @@ def render_dashboard() -> None:
             </div>
             """, unsafe_allow_html=True)
 
-    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
     st.markdown('<div class="section-title">📋 Tareas Recientes</div>', unsafe_allow_html=True)
     for task in sorted(st.session_state.tasks, key=lambda x: x.get("created_at",""), reverse=True)[:4]:
         st.markdown(f"""
@@ -1079,7 +1268,8 @@ def render_tasks_page() -> None:
     col_h, col_btn = st.columns([3, 1])
     with col_h:
         st.markdown('<div class="page-title">Mis Tareas</div>', unsafe_allow_html=True)
-        st.markdown('<div class="page-subtitle">Gestiona y organiza todas tus tareas</div>', unsafe_allow_html=True)
+        st.markdown('<div class="page-subtitle">Gestiona y organiza todas tus tareas</div>',
+                    unsafe_allow_html=True)
     with col_btn:
         st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
         if st.button("➕ Nueva Tarea", key="open_new_task", use_container_width=True):
@@ -1091,7 +1281,8 @@ def render_tasks_page() -> None:
         render_new_task_form()
 
     search = st.text_input("🔍 Buscar tareas...", value=st.session_state.search_query,
-                           placeholder="Buscar por título, descripción o etiquetas...", key="search_input")
+                           placeholder="Buscar por título, descripción o etiquetas...",
+                           key="search_input")
     if search != st.session_state.search_query:
         st.session_state.search_query = search
 
@@ -1100,11 +1291,12 @@ def render_tasks_page() -> None:
         status_filter = st.radio("Estado", ["Todas","Activa","Pendiente","Completada"],
                                   horizontal=True, key="status_filter_radio")
     with cf2:
-        category_filter = st.selectbox("Categoría", ["Todas"]+CATEGORIES, key="category_filter_select")
+        category_filter = st.selectbox("Categoría", ["Todas"]+CATEGORIES,
+                                        key="category_filter_select")
 
-    filtered = get_filtered_tasks(status_filter, category_filter, st.session_state.search_query)
+    filtered  = get_filtered_tasks(status_filter, category_filter, st.session_state.search_query)
     total     = len(st.session_state.tasks)
-    completed = sum(1 for t in st.session_state.tasks if t["status"]=="Completada")
+    completed = sum(1 for t in st.session_state.tasks if t["status"] == "Completada")
     st.markdown(
         f'<div class="task-count">{len(filtered)} encontradas &nbsp;·&nbsp; '
         f'{total} total &nbsp;·&nbsp; {completed} completadas</div>',
@@ -1174,7 +1366,8 @@ def render_team_page() -> None:
     col_h, col_btn = st.columns([3, 1])
     with col_h:
         st.markdown('<div class="page-title">👥 Equipos</div>', unsafe_allow_html=True)
-        st.markdown('<div class="page-subtitle">Crea y gestiona tus equipos de trabajo</div>', unsafe_allow_html=True)
+        st.markdown('<div class="page-subtitle">Crea y gestiona tus equipos de trabajo</div>',
+                    unsafe_allow_html=True)
     with col_btn:
         st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
         if st.button("➕ Nuevo Equipo", key="open_new_team", use_container_width=True):
@@ -1188,10 +1381,14 @@ def render_team_page() -> None:
                     unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         with c1:
-            team_name  = st.text_input("Nombre del equipo *", placeholder="ej: Equipo Frontend", key="new_team_name")
-            team_desc  = st.text_area("Descripción", placeholder="¿Cuál es el propósito?", key="new_team_desc", height=80)
+            team_name   = st.text_input("Nombre del equipo *",
+                                         placeholder="ej: Equipo Frontend", key="new_team_name")
+            team_desc   = st.text_area("Descripción",
+                                        placeholder="¿Cuál es el propósito?",
+                                        key="new_team_desc", height=80)
         with c2:
-            leader_name = st.text_input("Tu nombre (serás el Líder) *", placeholder="ej: Ana García", key="new_team_leader")
+            leader_name = st.text_input("Tu nombre (serás el Líder) *",
+                                         placeholder="ej: Ana García", key="new_team_leader")
             st.markdown("""
             <div style="background:rgba(229,90,43,0.08);border-radius:10px;padding:0.75rem 1rem;
                         border:1px solid rgba(229,90,43,0.2);margin-top:0.5rem;">
@@ -1202,7 +1399,7 @@ def render_team_page() -> None:
                     🟢 <b>Editor</b>: Edita tareas · ⚪ <b>Viewer</b>: Solo lectura</div>
             </div>
             """, unsafe_allow_html=True)
-        cs, cc, _ = st.columns([1,1,3])
+        cs, cc, _ = st.columns([1, 1, 3])
         with cs:
             if st.button("✅ Crear Equipo", key="btn_create_team", use_container_width=True):
                 if not team_name.strip():
@@ -1241,12 +1438,11 @@ def render_team_page() -> None:
         <div class="team-card">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.75rem;">
                 <div>
-                    <div style="font-size:1.1rem;font-weight:700;color:var(--text-primary);font-family:'Sora',sans-serif;">
-                        {team['name']}</div>
-                    <div style="font-size:0.8rem;color:var(--text-secondary);font-family:'Sora',sans-serif;">
-                        {team.get('description','Sin descripción')}</div>
+                    <div class="team-name">{team['name']}</div>
+                    <div class="team-desc">{team.get('description','Sin descripción')}</div>
                 </div>
-                <div style="font-size:0.75rem;color:var(--text-secondary);font-family:'Sora',sans-serif;text-align:right;flex-shrink:0;">
+                <div style="font-size:0.75rem;color:var(--text-secondary);font-family:'Sora',sans-serif;
+                            text-align:right;flex-shrink:0;">
                     👑 Líder: {leader['member_name'] if leader else 'Sin líder'}<br>
                     <span style="color:var(--accent-primary);font-weight:600;">{len(members)} miembros</span>
                 </div>
@@ -1260,7 +1456,8 @@ def render_team_page() -> None:
             st.markdown(f"""
             <span style="display:inline-flex;align-items:center;gap:0.4rem;
                          background:rgba(0,0,0,0.04);border-radius:20px;
-                         padding:0.2rem 0.6rem;margin-bottom:0.2rem;border:1px solid var(--border-color);">
+                         padding:0.2rem 0.6rem;margin-bottom:0.2rem;
+                         border:1px solid var(--border-color);">
                 <span style="width:22px;height:22px;border-radius:50%;background:{color};
                              display:inline-flex;align-items:center;justify-content:center;
                              color:white;font-size:0.6rem;font-weight:700;">{initials}</span>
@@ -1300,22 +1497,22 @@ def render_team_page() -> None:
                     st.session_state.confirm_delete_team_id = None
                     st.rerun()
 
-        # ── Panel de gestión de miembros ──
         if st.session_state.managing_team_id == team["id"]:
             st.markdown("""
             <div style="background:var(--bg-card);border-radius:14px;padding:1.25rem;
                         border:1px solid var(--border-color);margin-top:0.5rem;margin-bottom:0.5rem;">
             """, unsafe_allow_html=True)
-
             tab_add, tab_manage = st.tabs(["➕ Agregar miembro", "🔧 Gestionar miembros"])
 
             with tab_add:
                 cnm, cnr, cnb = st.columns([2, 1, 1])
                 with cnm:
-                    new_member_name = st.text_input("Nombre del miembro", placeholder="ej: Carlos Ruiz",
-                                                    key=f"new_member_{team['id']}")
+                    new_member_name = st.text_input("Nombre del miembro",
+                                                     placeholder="ej: Carlos Ruiz",
+                                                     key=f"new_member_{team['id']}")
                 with cnr:
-                    new_member_role = st.selectbox("Rol", TEAM_ROLES, key=f"new_member_role_{team['id']}")
+                    new_member_role = st.selectbox("Rol", TEAM_ROLES,
+                                                    key=f"new_member_role_{team['id']}")
                 with cnb:
                     st.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
                     if st.button("Agregar", key=f"add_member_{team['id']}", use_container_width=True):
@@ -1342,9 +1539,10 @@ def render_team_page() -> None:
                                 {m['member_name']}</div>
                             """, unsafe_allow_html=True)
                         with c_role:
-                            cur_idx = TEAM_ROLES.index(m["role"]) if m["role"] in TEAM_ROLES else 1
+                            cur_idx  = TEAM_ROLES.index(m["role"]) if m["role"] in TEAM_ROLES else 1
                             new_role = st.selectbox("Rol", TEAM_ROLES, index=cur_idx,
-                                                     key=f"role_sel_{m['id']}", label_visibility="collapsed")
+                                                     key=f"role_sel_{m['id']}",
+                                                     label_visibility="collapsed")
                             if new_role != m["role"]:
                                 if st.button("✓", key=f"save_role_{m['id']}", help="Guardar rol"):
                                     db_update_member_role(m["id"], new_role, m["member_name"])
@@ -1352,8 +1550,9 @@ def render_team_page() -> None:
                                     st.rerun()
                         with c_move:
                             if other_teams:
-                                target_name = st.selectbox("Mover a", [t["name"] for t in other_teams],
-                                                            key=f"move_target_{m['id']}", label_visibility="collapsed")
+                                target_name = st.selectbox(
+                                    "Mover a", [t["name"] for t in other_teams],
+                                    key=f"move_target_{m['id']}", label_visibility="collapsed")
                                 if st.button("↗ Mover", key=f"move_member_{m['id']}", use_container_width=True):
                                     target = next(t for t in other_teams if t["name"]==target_name)
                                     if db_move_member(m["id"], target["id"], m["member_name"], target["name"]):
@@ -1361,29 +1560,44 @@ def render_team_page() -> None:
                                         st.success(f"{m['member_name']} movido a {target['name']}.")
                                         st.rerun()
                             else:
-                                st.markdown("<div style='font-size:0.75rem;color:var(--text-secondary);padding-top:0.5rem;'>Sin otros equipos</div>",
-                                            unsafe_allow_html=True)
+                                st.markdown(
+                                    "<div style='font-size:0.75rem;color:var(--text-secondary);"
+                                    "padding-top:0.5rem;'>Sin otros equipos</div>",
+                                    unsafe_allow_html=True)
                         with c_rem:
-                            if st.button("✕", key=f"remove_member_{m['id']}", help=f"Remover a {m['member_name']}"):
+                            if st.button("✕", key=f"remove_member_{m['id']}",
+                                          help=f"Remover a {m['member_name']}"):
                                 if db_remove_member(m["id"], m["member_name"], team["name"]):
                                     st.session_state.teams = db_load_teams()
                                     st.success(f"{m['member_name']} removido.")
                                     st.rerun()
-                        st.markdown("<div style='height:0.1rem;background:var(--border-color);margin:0.3rem 0;'></div>",
-                                    unsafe_allow_html=True)
+                        st.markdown(
+                            "<div style='height:0.1rem;background:var(--border-color);margin:0.3rem 0;'></div>",
+                            unsafe_allow_html=True)
 
             st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
 
 def render_reminders_page() -> None:
+    """
+    FIX: El bug del HTML crudo se producía porque render_priority_badge()
+    retorna un string HTML y al usarlo dentro de otro f-string con
+    unsafe_allow_html=True, Streamlit a veces lo escapa si el string
+    exterior no cierra correctamente los tags.
+
+    Solución: separar cada tarjeta en DOS llamadas st.markdown:
+      1. La parte de texto/layout (sin el badge de prioridad)
+      2. El badge por separado, o mejor: usar st.columns para separar
+         los elementos y evitar que el HTML anidado se escape.
+    """
     col_h, col_btn = st.columns([3, 1])
     with col_h:
         st.markdown('<div class="page-title">🔔 Recordatorios</div>', unsafe_allow_html=True)
     with col_btn:
         st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
         if st.button("➕ Nueva Tarea", key="new_reminder_btn", use_container_width=True):
-            st.session_state.active_page = "Tareas"
+            st.session_state.active_page        = "Tareas"
             st.session_state.show_new_task_form = True
             st.rerun()
 
@@ -1395,33 +1609,58 @@ def render_reminders_page() -> None:
         return
 
     today_str = date.today().isoformat()
+
     for task in reminders:
-        dd = task.get("due_date","")
+        dd         = task.get("due_date","")
         is_today   = dd == today_str
         is_overdue = dd < today_str and task["status"] != "Completada"
-        border = "#ef4444" if is_overdue else ("#f59e0b" if is_today else "var(--border-color)")
-        cat_badge  = f'<span class="badge badge-tag">{task.get("category","")}</span>'
-        alarm_icon = "🚨" if is_overdue else ("⏰" if is_today else "🔔")
 
-        st.markdown(f"""
-        <div class="reminder-card" style="border-color:{border};">
-            <div style="width:36px;height:36px;border-radius:50%;background:rgba(229,90,43,0.12);
-                        display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;">
-                {alarm_icon}</div>
-            <div style="flex:1;">
-                <div style="font-weight:600;font-size:0.9rem;color:var(--text-primary);font-family:'Sora',sans-serif;">
-                    {task['title']}</div>
-                <div style="font-size:0.78rem;color:var(--text-secondary);font-family:'Sora',sans-serif;">
-                    {task.get('description','')}</div>
-                <div style="margin-top:0.3rem;font-size:0.76rem;color:var(--text-secondary);font-family:'Sora',sans-serif;">
-                    📅 {dd} &nbsp; {cat_badge}
-                    {"&nbsp;<strong style='color:#ef4444'>VENCIDA</strong>" if is_overdue else ""}
-                    {"&nbsp;<strong style='color:#f59e0b'>HOY</strong>" if is_today else ""}
+        border     = "#ef4444" if is_overdue else ("#f59e0b" if is_today else "var(--border-color)")
+        alarm_icon = "🚨" if is_overdue else ("⏰" if is_today else "🔔")
+        cat        = task.get("category","")
+
+        # ── Etiquetas de alerta (solo texto, sin HTML externo) ──
+        alert_txt = ""
+        if is_overdue:
+            alert_txt = "  🔴 VENCIDA"
+        elif is_today:
+            alert_txt = "  🟡 HOY"
+
+        # ── Layout: icono | contenido | prioridad ──
+        # Se usan 3 columnas para evitar anidar HTML de badge dentro de otro bloque HTML,
+        # que era la causa del renderizado como texto plano.
+        col_icon, col_body, col_badge = st.columns([1, 8, 2])
+
+        with col_icon:
+            st.markdown(f"""
+            <div style="display:flex;align-items:center;justify-content:center;
+                        height:100%;padding-top:0.5rem;font-size:1.4rem;">{alarm_icon}</div>
+            """, unsafe_allow_html=True)
+
+        with col_body:
+            # Construir badge de categoría como HTML simple sin funciones externas
+            cat_html = (f'<span class="badge badge-tag">{cat}</span>' if cat else "")
+            st.markdown(f"""
+            <div style="border-left:3px solid {border};padding-left:0.75rem;
+                        padding-top:0.25rem;padding-bottom:0.25rem;">
+                <div class="reminder-title">{task['title']}</div>
+                <div class="reminder-desc">{task.get('description','')}</div>
+                <div class="reminder-meta">
+                    📅 {dd} &nbsp; {cat_html}
+                    <span style="font-weight:600;">{alert_txt}</span>
                 </div>
             </div>
-            <div style="flex-shrink:0;">{render_priority_badge(task['priority'])}</div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+
+        with col_badge:
+            # El badge de prioridad se renderiza en su propia celda de columna,
+            # completamente aislado del f-string anterior.
+            st.markdown(
+                f'<div style="padding-top:0.5rem;">{render_priority_badge(task["priority"])}</div>',
+                unsafe_allow_html=True)
+
+        st.markdown("<div style='height:0.1rem;background:var(--border-color);margin:0.2rem 0;'></div>",
+                    unsafe_allow_html=True)
 
 
 def render_activity_page() -> None:
@@ -1447,27 +1686,27 @@ def render_activity_page() -> None:
         return
 
     action_icons = {
-        "creó la tarea":       ("✅","#22c55e"),
-        "actualizó la tarea":  ("✏️","#8b5cf6"),
-        "eliminó la tarea":    ("🗑️","#ef4444"),
-        "completó la tarea":   ("🎯","#22c55e"),
-        "reactivó la tarea":   ("↩️","#f59e0b"),
-        "creó el equipo":      ("👥","#3b82f6"),
-        "agregó":              ("➕","#0d9488"),
-        "removió":             ("✕","#ef4444"),
-        "movió":               ("↗️","#f59e0b"),
-        "cambió el rol":       ("🔄","#8b5cf6"),
-        "eliminó el equipo":   ("🗑️","#ef4444"),
+        "creó la tarea":      ("✅","#22c55e"),
+        "actualizó la tarea": ("✏️","#8b5cf6"),
+        "eliminó la tarea":   ("🗑️","#ef4444"),
+        "completó la tarea":  ("🎯","#22c55e"),
+        "reactivó la tarea":  ("↩️","#f59e0b"),
+        "creó el equipo":     ("👥","#3b82f6"),
+        "agregó":             ("➕","#0d9488"),
+        "removió":            ("✕","#ef4444"),
+        "movió":              ("↗️","#f59e0b"),
+        "cambió el rol":      ("🔄","#8b5cf6"),
+        "eliminó el equipo":  ("🗑️","#ef4444"),
     }
 
     for item in activity:
-        action = item.get("action","")
+        action     = item.get("action","")
         icon, color = next(
             ((ic,co) for key,(ic,co) in action_icons.items() if key in action),
             ("📌","#6b7280"),
         )
-        r,g,b = _hex_to_rgb(color)
-        entity = item.get("entity_name","")
+        r,g,b   = _hex_to_rgb(color)
+        entity  = item.get("entity_name","")
         st.markdown(f"""
         <div class="activity-item">
             <div class="activity-icon" style="background:rgba({r},{g},{b},0.12);">{icon}</div>
@@ -1487,38 +1726,37 @@ def render_config_page() -> None:
     st.markdown('<div class="page-title">⚙️ Configuración</div>', unsafe_allow_html=True)
     st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
 
+    # ── Perfil ──
     with st.expander("👤 Perfil", expanded=True):
         c1, c2 = st.columns(2)
-        with c1: st.text_input("Nombre completo", value="Usuario Demo", key="config_name")
-        with c2: st.text_input("Email", value="usuario@gestorpro.com", key="config_email")
+        with c1:
+            st.text_input("Nombre completo", value="Usuario Demo", key="config_name")
+        with c2:
+            st.text_input("Email", value="usuario@gestorpro.com", key="config_email")
         if st.button("💾 Guardar Perfil", key="save_profile"):
             st.success("✅ Perfil actualizado correctamente.")
 
+    # ── Notificaciones ──
     with st.expander("🔔 Notificaciones", expanded=True):
-        st.toggle("Notificaciones de tareas",    value=True,  key="notif_tasks")
-        st.toggle("Recordatorios diarios",        value=True,  key="notif_daily")
-        st.toggle("Actualizaciones de proyectos", value=False, key="notif_projects")
-        st.toggle("Mensajes del equipo",          value=True,  key="notif_team")
+        st.toggle("Notificaciones de tareas",     value=True,  key="notif_tasks")
+        st.toggle("Recordatorios diarios",         value=True,  key="notif_daily")
+        st.toggle("Actualizaciones de proyectos",  value=False, key="notif_projects")
+        st.toggle("Mensajes del equipo",           value=True,  key="notif_team")
         if st.button("💾 Guardar Notificaciones", key="save_notifs"):
             st.success("✅ Preferencias guardadas.")
 
+    # ── Apariencia — FIX modo claro ──
     with st.expander("🎨 Apariencia", expanded=False):
-        # FIX: key distinta al sidebar, on_change actualiza dark_mode y fuerza rerun
+        # on_change sincroniza dark_mode y provoca rerun para regenerar CSS
         def _apply_dark():
             st.session_state.dark_mode = st.session_state._cfg_dark
 
-        st.toggle(
-            "🌙 Modo Oscuro",
-            value=st.session_state.dark_mode,
-            key="_cfg_dark",
-            on_change=_apply_dark,
-        )
-        st.markdown(
-            '<div style="font-size:0.8rem;color:var(--text-secondary);'
-            'font-family:\'Sora\',sans-serif;margin-top:0.5rem;">'
-            "También puedes alternar el tema desde el panel lateral.</div>",
-            unsafe_allow_html=True)
+        st.toggle("🌙 Modo Oscuro", value=st.session_state.dark_mode,
+                   key="_cfg_dark", on_change=_apply_dark)
+        st.markdown('<div class="config-hint">También puedes alternar el tema desde el panel lateral.</div>',
+                    unsafe_allow_html=True)
 
+    # ── Gestión de Datos ──
     with st.expander("🗄️ Gestión de Datos", expanded=False):
         col_export, col_reset = st.columns(2)
         with col_export:
@@ -1537,14 +1775,16 @@ def render_config_page() -> None:
                 st.success("✅ Datos de ejemplo restaurados.")
                 st.rerun()
 
+    # ── Conexión Supabase ──
     with st.expander("🔌 Base de Datos (Supabase)", expanded=False):
+        status_html = (
+            '<span style="color:#16a34a;font-weight:600;">✅ Conectado a Supabase</span>'
+            if st.session_state.db_ok
+            else '<span style="color:#ef4444;font-weight:600;">❌ Sin conexión</span>'
+        )
         st.markdown(f"""
-        <div style="font-family:'Sora',sans-serif;font-size:0.85rem;color:var(--text-primary);">
-            <div style="margin-bottom:0.5rem;"><b>Estado:</b>
-                {'<span style="color:#22c55e;">✅ Conectado a Supabase</span>'
-                  if st.session_state.db_ok
-                  else '<span style="color:#ef4444;">❌ Sin conexión</span>'}
-            </div>
+        <div class="config-info">
+            <div style="margin-bottom:0.5rem;"><b>Estado:</b> {status_html}</div>
             <div><b>Host:</b> db.wopthjsdceattleaeczt.supabase.co:5432</div>
             <div><b>Base de datos:</b> postgres</div>
             <div><b>Usuario:</b> postgres</div>
