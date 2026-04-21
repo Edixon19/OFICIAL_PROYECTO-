@@ -1,8 +1,8 @@
 """
 GestorPro - Gestor de Tareas con Streamlit + Supabase (PostgreSQL)
 ==================================================================
-Versión 1.1 — Correcciones:
-  · Sidebar FIJO (sin botón de colapsar — se elimina con CSS)
+Versión 1.2 — Correcciones:
+  · Sidebar FIJO (sin botón de colapsar — eliminado con CSS multicapa + JS)
   · FIX recordatorios: HTML del badge se renderizaba como texto plano
   · FIX modo claro: textos de toggles, expanders, labels y
     todos los elementos que quedaban blancos sobre fondo blanco
@@ -45,8 +45,6 @@ CATEGORY_COLORS = {
 }
 
 # ── Temas ─────────────────────────────────────
-# Nota: todos los colores de texto son EXPLÍCITOS para evitar
-# que hereden valores incorrectos en cada modo.
 THEMES = {
     "light": {
         "--bg-main":         "#f8fafc",
@@ -351,22 +349,19 @@ def init_session_state() -> None:
 
 def inject_css() -> None:
     """
-    CSS global con tres objetivos principales:
+    CSS + JS con tres capas de protección para el sidebar fijo:
 
-    1. SIDEBAR FIJO — se elimina el botón de colapsar/expandir con CSS.
-       El sidebar siempre está visible; no hay flecha ni toggle.
-
-    2. COLORES MODO CLARO — todos los textos usan color: var(--text-primary)
-       explícito para que nunca hereden el blanco del tema Streamlit por defecto.
-       Se sobreescriben: expanders, toggles, labels, placeholders, tabs, info boxes.
-
-    3. HTML EN RECORDATORIOS — este bug no es de CSS; se arregló separando
-       el badge HTML en una variable Python antes del f-string principal.
+    CAPA 1 — CSS exhaustivo: cubre todos los data-testid conocidos del botón
+             de colapsar con display:none, pointer-events:none y opacity:0.
+    CAPA 2 — CSS en aria-expanded=false: si Streamlit colapsa el sidebar,
+             se fuerza transform:none y left:0 para mantenerlo visible.
+    CAPA 3 — JavaScript MutationObserver: elimina el botón cada vez que
+             Streamlit lo vuelva a insertar tras un rerun, y revierte
+             cualquier estado colapsado en tiempo real.
     """
     theme    = THEMES["dark"] if st.session_state.dark_mode else THEMES["light"]
     css_vars = "\n".join(f"    {k}: {v};" for k, v in theme.items())
 
-    # Color explícito para uso inline en elementos que no leen variables CSS
     tp  = theme["--text-primary"]
     ts  = theme["--text-secondary"]
     bc  = theme["--bg-card"]
@@ -391,23 +386,48 @@ def inject_css() -> None:
     .stDeployButton {{ display: none; }}
 
     /* ══════════════════════════════════════════
-       SIDEBAR FIJO — sin botón de colapsar
-       Se oculta el control de colapsar/expandir
-       para que el sidebar quede permanentemente
-       visible y no haya confusión con la flecha.
+       SIDEBAR FIJO — CAPA 1: CSS exhaustivo
+       Cubre todos los selectores conocidos del
+       botón de colapsar en distintas versiones
+       de Streamlit. Se usa pointer-events:none
+       como respaldo por si display:none falla.
     ══════════════════════════════════════════ */
     [data-testid="collapsedControl"],
-    button[data-testid="collapsedControl"] {{
+    button[data-testid="collapsedControl"],
+    [data-testid="stSidebarCollapseButton"],
+    button[data-testid="stSidebarCollapseButton"],
+    [data-testid="stSidebarCollapsedControl"],
+    .stSidebarCollapsedControl,
+    section[data-testid="stSidebar"] > div:first-child > div > button,
+    section[data-testid="stSidebar"] button[kind="header"] {{
         display: none !important;
         visibility: hidden !important;
+        pointer-events: none !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        position: absolute !important;
+        opacity: 0 !important;
     }}
 
-    section[data-testid="stSidebar"] {{
+    /* ══════════════════════════════════════════
+       SIDEBAR FIJO — CAPA 2: forzar visible
+       Tanto en estado expandido como colapsado,
+       el sidebar mantiene su ancho y posición.
+    ══════════════════════════════════════════ */
+    section[data-testid="stSidebar"],
+    section[data-testid="stSidebar"][aria-expanded="false"] {{
         background: var(--bg-sidebar) !important;
         border-right: 1px solid rgba(255,255,255,0.08) !important;
         min-width: 240px !important;
         max-width: 280px !important;
+        transform: none !important;
+        left: 0 !important;
+        visibility: visible !important;
+        display: block !important;
+        transition: none !important;
     }}
+
     /* Todos los textos del sidebar en color claro */
     section[data-testid="stSidebar"],
     section[data-testid="stSidebar"] p,
@@ -429,24 +449,18 @@ def inject_css() -> None:
 
     /* ══════════════════════════════════════════
        COLORES MODO CLARO — corrección global
-       Todos los elementos de texto deben usar
-       var(--text-primary) o var(--text-secondary)
-       explícitamente para evitar herencia de blanco.
     ══════════════════════════════════════════ */
 
-    /* Párrafos, spans y divs genéricos */
     .main p, .main span:not(.badge), .main div:not([class*="st"]) {{
         color: var(--text-primary);
     }}
 
-    /* Headings */
     h1, h2, h3, h4, h5, h6 {{
         color: var(--text-primary) !important;
         font-family: 'Sora', sans-serif !important;
         font-weight: 700 !important;
     }}
 
-    /* Labels de inputs, selectbox, date, radio */
     .stTextInput > label,
     .stTextArea > label,
     .stSelectbox > label,
@@ -461,7 +475,6 @@ def inject_css() -> None:
         font-weight: 500 !important;
     }}
 
-    /* Inputs */
     .stTextInput > div > div > input,
     .stTextArea > div > div > textarea,
     .stSelectbox > div > div > div,
@@ -479,14 +492,13 @@ def inject_css() -> None:
         border-color: var(--accent-primary) !important;
         box-shadow: 0 0 0 3px rgba(229,90,43,0.15) !important;
     }}
-    /* Placeholder */
     .stTextInput > div > div > input::placeholder,
     .stTextArea > div > div > textarea::placeholder {{
         color: var(--text-secondary) !important;
         opacity: 1 !important;
     }}
 
-    /* ── Toggles — FIX modo claro ── */
+    /* ── Toggles ── */
     div[data-testid="stToggle"] > label,
     div[data-testid="stToggle"] label,
     div[data-testid="stToggle"] p,
@@ -495,7 +507,7 @@ def inject_css() -> None:
         font-family: 'Sora', sans-serif !important;
     }}
 
-    /* ── Expanders — FIX modo claro ── */
+    /* ── Expanders ── */
     .streamlit-expanderHeader,
     [data-testid="stExpander"] summary,
     [data-testid="stExpander"] summary p,
@@ -511,7 +523,7 @@ def inject_css() -> None:
         border-color: var(--border-color) !important;
     }}
 
-    /* ── Tabs — FIX modo claro ── */
+    /* ── Tabs ── */
     .stTabs [data-baseweb="tab-list"] {{
         background: var(--bg-card) !important;
         border-bottom: 1px solid var(--border-color) !important;
@@ -547,7 +559,7 @@ def inject_css() -> None:
         color: inherit !important;
     }}
 
-    /* ── Radio horizontal — FIX colores ── */
+    /* ── Radio horizontal ── */
     .stRadio > div {{
         flex-direction: row !important;
         gap: 0.5rem !important;
@@ -809,7 +821,7 @@ def inject_css() -> None:
     .logo-text {{ font-size: 1.1rem; font-weight: 700; color: #f1f5f9; font-family: 'Sora', sans-serif; }}
     .logo-sub  {{ font-size: 0.7rem; color: #94a3b8; font-family: 'Sora', sans-serif; }}
 
-    /* ── Configuración — colores modo claro ── */
+    /* ── Configuración ── */
     .config-label {{
         font-size: 0.85rem; font-weight: 500;
         color: var(--text-primary); font-family: 'Sora', sans-serif;
@@ -826,7 +838,74 @@ def inject_css() -> None:
     .config-info b {{ color: var(--text-primary); }}
     </style>
     """
+
+    # ══════════════════════════════════════════
+    # CAPA 3 — JavaScript MutationObserver
+    # Elimina el botón de colapsar cada vez que
+    # Streamlit lo vuelva a insertar tras un rerun
+    # y revierte el sidebar si quedó colapsado.
+    # ══════════════════════════════════════════
+    js = """
+    <script>
+    (function fixSidebar() {
+        var COLLAPSE_SELECTORS = [
+            '[data-testid="collapsedControl"]',
+            '[data-testid="stSidebarCollapseButton"]',
+            '[data-testid="stSidebarCollapsedControl"]',
+            'button[data-testid="collapsedControl"]',
+            'button[data-testid="stSidebarCollapseButton"]'
+        ];
+
+        function removeCollapseBtn() {
+            COLLAPSE_SELECTORS.forEach(function(sel) {
+                document.querySelectorAll(sel).forEach(function(el) {
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                    el.style.pointerEvents = 'none';
+                    el.style.opacity = '0';
+                    el.style.width = '0';
+                    el.style.height = '0';
+                    el.style.overflow = 'hidden';
+                    el.style.position = 'absolute';
+                });
+            });
+
+            // Revertir sidebar si Streamlit lo colapso
+            var sidebar = document.querySelector('section[data-testid="stSidebar"]');
+            if (sidebar) {
+                if (sidebar.getAttribute('aria-expanded') === 'false') {
+                    sidebar.setAttribute('aria-expanded', 'true');
+                }
+                sidebar.style.transform = 'none';
+                sidebar.style.left = '0';
+                sidebar.style.minWidth = '240px';
+                sidebar.style.visibility = 'visible';
+                sidebar.style.display = 'block';
+            }
+        }
+
+        // Ejecutar al cargar
+        removeCollapseBtn();
+
+        // Observar cambios del DOM en tiempo real
+        var observer = new MutationObserver(function(mutations) {
+            removeCollapseBtn();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        // Respaldo adicional: ejecutar cada 500ms durante los primeros 5 segundos
+        var count = 0;
+        var interval = setInterval(function() {
+            removeCollapseBtn();
+            count++;
+            if (count >= 10) clearInterval(interval);
+        }, 500);
+    })();
+    </script>
+    """
+
     st.markdown(css, unsafe_allow_html=True)
+    st.markdown(js, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════
@@ -1105,7 +1184,6 @@ def render_sidebar() -> None:
         st.markdown("<div style='height:1px;background:rgba(255,255,255,0.08);margin-bottom:0.75rem;'></div>",
                     unsafe_allow_html=True)
 
-        # Toggle modo oscuro — sidebar
         dark = st.toggle("🌙  Modo Oscuro", value=st.session_state.dark_mode, key="sidebar_dark_toggle")
         if dark != st.session_state.dark_mode:
             st.session_state.dark_mode = dark
@@ -1580,17 +1658,6 @@ def render_team_page() -> None:
 
 
 def render_reminders_page() -> None:
-    """
-    FIX: El bug del HTML crudo se producía porque render_priority_badge()
-    retorna un string HTML y al usarlo dentro de otro f-string con
-    unsafe_allow_html=True, Streamlit a veces lo escapa si el string
-    exterior no cierra correctamente los tags.
-
-    Solución: separar cada tarjeta en DOS llamadas st.markdown:
-      1. La parte de texto/layout (sin el badge de prioridad)
-      2. El badge por separado, o mejor: usar st.columns para separar
-         los elementos y evitar que el HTML anidado se escape.
-    """
     col_h, col_btn = st.columns([3, 1])
     with col_h:
         st.markdown('<div class="page-title">🔔 Recordatorios</div>', unsafe_allow_html=True)
@@ -1619,16 +1686,12 @@ def render_reminders_page() -> None:
         alarm_icon = "🚨" if is_overdue else ("⏰" if is_today else "🔔")
         cat        = task.get("category","")
 
-        # ── Etiquetas de alerta (solo texto, sin HTML externo) ──
         alert_txt = ""
         if is_overdue:
             alert_txt = "  🔴 VENCIDA"
         elif is_today:
             alert_txt = "  🟡 HOY"
 
-        # ── Layout: icono | contenido | prioridad ──
-        # Se usan 3 columnas para evitar anidar HTML de badge dentro de otro bloque HTML,
-        # que era la causa del renderizado como texto plano.
         col_icon, col_body, col_badge = st.columns([1, 8, 2])
 
         with col_icon:
@@ -1638,7 +1701,6 @@ def render_reminders_page() -> None:
             """, unsafe_allow_html=True)
 
         with col_body:
-            # Construir badge de categoría como HTML simple sin funciones externas
             cat_html = (f'<span class="badge badge-tag">{cat}</span>' if cat else "")
             st.markdown(f"""
             <div style="border-left:3px solid {border};padding-left:0.75rem;
@@ -1653,8 +1715,6 @@ def render_reminders_page() -> None:
             """, unsafe_allow_html=True)
 
         with col_badge:
-            # El badge de prioridad se renderiza en su propia celda de columna,
-            # completamente aislado del f-string anterior.
             st.markdown(
                 f'<div style="padding-top:0.5rem;">{render_priority_badge(task["priority"])}</div>',
                 unsafe_allow_html=True)
@@ -1726,7 +1786,6 @@ def render_config_page() -> None:
     st.markdown('<div class="page-title">⚙️ Configuración</div>', unsafe_allow_html=True)
     st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
 
-    # ── Perfil ──
     with st.expander("👤 Perfil", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
@@ -1736,7 +1795,6 @@ def render_config_page() -> None:
         if st.button("💾 Guardar Perfil", key="save_profile"):
             st.success("✅ Perfil actualizado correctamente.")
 
-    # ── Notificaciones ──
     with st.expander("🔔 Notificaciones", expanded=True):
         st.toggle("Notificaciones de tareas",     value=True,  key="notif_tasks")
         st.toggle("Recordatorios diarios",         value=True,  key="notif_daily")
@@ -1745,9 +1803,7 @@ def render_config_page() -> None:
         if st.button("💾 Guardar Notificaciones", key="save_notifs"):
             st.success("✅ Preferencias guardadas.")
 
-    # ── Apariencia — FIX modo claro ──
     with st.expander("🎨 Apariencia", expanded=False):
-        # on_change sincroniza dark_mode y provoca rerun para regenerar CSS
         def _apply_dark():
             st.session_state.dark_mode = st.session_state._cfg_dark
 
@@ -1756,7 +1812,6 @@ def render_config_page() -> None:
         st.markdown('<div class="config-hint">También puedes alternar el tema desde el panel lateral.</div>',
                     unsafe_allow_html=True)
 
-    # ── Gestión de Datos ──
     with st.expander("🗄️ Gestión de Datos", expanded=False):
         col_export, col_reset = st.columns(2)
         with col_export:
@@ -1775,7 +1830,6 @@ def render_config_page() -> None:
                 st.success("✅ Datos de ejemplo restaurados.")
                 st.rerun()
 
-    # ── Conexión Supabase ──
     with st.expander("🔌 Base de Datos (Supabase)", expanded=False):
         status_html = (
             '<span style="color:#16a34a;font-weight:600;">✅ Conectado a Supabase</span>'
