@@ -1,4 +1,12 @@
+
+#GestorPro, Capa de acceso a datos
+
+
 import os
+import json
+import uuid
+from datetime import datetime, date
+
 import streamlit as st
 
 # ─────────────────────────────────────────────
@@ -11,9 +19,11 @@ try:
 except ImportError:
     PSYCOPG2_OK = False
 
+
 # ─────────────────────────────────────────────
 # GESTIÓN DE LA URL (Pooler)
 # ─────────────────────────────────────────────
+
 def _get_dsn() -> str:
     # Prioridad 1: Streamlit Secrets
     try:
@@ -26,25 +36,24 @@ def _get_dsn() -> str:
     if env_url:
         return env_url
 
-    # Prioridad 3: Fallback (Copia aquí tu URL completa con puerto 6543)
+    # Prioridad 3: Fallback, URL completa
     return "postgresql://postgres.wopthjsdceattleaeczt:utede2026sem2@aws-1-us-east-2.pooler.supabase.com:6543/postgres"
+
 
 # ─────────────────────────────────────────────
 # CONEXIÓN CACHEADA (Optimización Pooler)
 # ─────────────────────────────────────────────
 
-@st.cache_resource(ttl=600) # <--- EL SECRETO: Refresca la conexión cada 10 min
+@st.cache_resource(ttl=600)  # Refresca la conexión cada 10 min
 def get_connection():
-    """
-    Abre y mantiene la conexión al Pooler de Supabase.
-    """
+    """Abre y mantiene la conexión al Pooler de Supabase."""
     if not PSYCOPG2_OK:
         return None
     try:
         conn = psycopg2.connect(
             _get_dsn(),
             connect_timeout=10,
-            sslmode="require" # Obligatorio para Pooler en muchos casos
+            sslmode="require",  # Obligatorio para Pooler en muchos casos
         )
         conn.autocommit = False
         return conn
@@ -52,15 +61,16 @@ def get_connection():
         print(f"[database.py] Error al conectar al Pooler: {e}")
         return None
 
+
 def get_cursor(conn):
     """Retorna un DictCursor para trabajar con diccionarios."""
     if conn is None:
         return None
-    # Si la conexión está cerrada o rota, esto fallará y devolverá None
     try:
         return conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     except Exception:
         return None
+
 
 def close_conn(conn) -> None:
     """Cierra la conexión."""
@@ -70,14 +80,236 @@ def close_conn(conn) -> None:
     except Exception:
         pass
 
+
 # ─────────────────────────────────────────────
-# INICIALIZACIÓN (Mantener igual)
+# INICIALIZACIÓN
 # ─────────────────────────────────────────────
+
 def init_db() -> bool:
     conn = get_connection()
     if conn is None:
         return False
-
-    # ... (Tu lista de ddl permanece igual) ...
-    # [Mantén tu código DDL aquí tal cual lo tenías]
     return True
+
+
+# ══════════════════════════════════════════════
+#  EJECUCIÓN SQL GENÉRICA
+# ══════════════════════════════════════════════
+
+def _exec(sql: str, params=(), fetch: str = "none"):
+    conn = get_connection()
+    if conn is None:
+        return [] if fetch == "all" else ({} if fetch == "one" else None)
+    cur = get_cursor(conn)
+    if cur is None:
+        return [] if fetch == "all" else ({} if fetch == "one" else None)
+    try:
+        cur.execute(sql, params)
+        if fetch == "all":
+            rows = cur.fetchall()
+            conn.commit()
+            return [dict(r) for r in rows]
+        elif fetch == "one":
+            row = cur.fetchone()
+            conn.commit()
+            return dict(row) if row else {}
+        else:
+            conn.commit()
+            return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Error BD: {e}")
+        return [] if fetch == "all" else ({} if fetch == "one" else False)
+    finally:
+        cur.close()
+
+
+# ══════════════════════════════════════════════
+#  TAREAS
+# ══════════════════════════════════════════════
+
+def db_load_tasks() -> list:
+    rows = _exec(
+        "SELECT * FROM tasks ORDER BY "
+        "CASE priority WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END, "
+        "created_at DESC",
+        fetch="all",
+    )
+    for r in rows:
+        if isinstance(r.get("tags"), str):
+            try:
+                r["tags"] = json.loads(r["tags"])
+            except Exception:
+                r["tags"] = []
+        elif r.get("tags") is None:
+            r["tags"] = []
+        if hasattr(r.get("due_date"), "isoformat"):
+            r["due_date"] = r["due_date"].isoformat()
+        if hasattr(r.get("created_at"), "isoformat"):
+            r["created_at"] = r["created_at"].isoformat()
+    return rows
+
+
+def db_add_task(title, description, priority, category, status, due_date, assignee, tags) -> bool:
+    task_id = str(uuid.uuid4())
+    ok = _exec(
+        """INSERT INTO tasks (id,title,description,priority,category,status,
+           due_date,assignee,tags,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
+        (task_id, title.strip(), description.strip(), priority, category, status,
+         due_date.isoformat() if due_date else date.today().isoformat(),
+         assignee.strip(), json.dumps(tags, ensure_ascii=False), datetime.now().isoformat()),
+    )
+    if ok:
+        _log_activity(assignee.strip() or "Sistema", "creó la tarea", "tarea", title.strip())
+    return bool(ok)
+
+
+def db_update_task(task_id: str, **kwargs) -> bool:
+    if "tags" in kwargs:
+        kwargs["tags"] = json.dumps(kwargs["tags"], ensure_ascii=False)
+    if not kwargs:
+        return False
+    set_parts = [f"{k} = %s::jsonb" if k == "tags" else f"{k} = %s" for k in kwargs]
+    ok = _exec(f"UPDATE tasks SET {', '.join(set_parts)} WHERE id = %s",
+               list(kwargs.values()) + [task_id])
+    if ok:
+        _log_activity("Usuario", "actualizó la tarea", "tarea", kwargs.get("title", task_id))
+    return bool(ok)
+
+
+def db_delete_task(task_id: str, task_title: str = "") -> bool:
+    ok = _exec("DELETE FROM tasks WHERE id = %s", (task_id,))
+    if ok:
+        _log_activity("Usuario", "eliminó la tarea", "tarea", task_title or task_id)
+    return bool(ok)
+
+
+def db_toggle_task_status(task_id: str, current_status: str, title: str = "") -> bool:
+    new_status = "Activa" if current_status == "Completada" else "Completada"
+    action = "completó la tarea" if new_status == "Completada" else "reactivó la tarea"
+    ok = _exec("UPDATE tasks SET status = %s WHERE id = %s", (new_status, task_id))
+    if ok:
+        _log_activity("Usuario", action, "tarea", title)
+    return bool(ok)
+
+
+# ══════════════════════════════════════════════
+#  EQUIPOS
+# ══════════════════════════════════════════════
+
+def db_load_teams() -> list:
+    teams = _exec("SELECT * FROM teams ORDER BY created_at DESC", fetch="all")
+    for team in teams:
+        if hasattr(team.get("created_at"), "isoformat"):
+            team["created_at"] = team["created_at"].isoformat()
+        members = _exec(
+            "SELECT * FROM team_members WHERE team_id = %s ORDER BY role",
+            (team["id"],), fetch="all",
+        )
+        for m in members:
+            if hasattr(m.get("joined_at"), "isoformat"):
+                m["joined_at"] = m["joined_at"].isoformat()
+        team["members"] = members
+    return teams
+
+
+def db_create_team(name: str, description: str, leader_name: str) -> bool:
+    team_id = str(uuid.uuid4())
+    ok = _exec("INSERT INTO teams (id,name,description) VALUES (%s,%s,%s)",
+               (team_id, name.strip(), description.strip()))
+    if ok and leader_name.strip():
+        _exec("INSERT INTO team_members (id,team_id,member_name,role) VALUES (%s,%s,%s,%s)",
+              (str(uuid.uuid4()), team_id, leader_name.strip(), "Líder"))
+        _log_activity(leader_name, "creó el equipo", "equipo", name.strip())
+    return bool(ok)
+
+
+def db_add_member(team_id: str, member_name: str, role: str, team_name: str = "") -> bool:
+    ok = _exec("INSERT INTO team_members (id,team_id,member_name,role) VALUES (%s,%s,%s,%s)",
+               (str(uuid.uuid4()), team_id, member_name.strip(), role))
+    if ok:
+        _log_activity("Usuario", f"agregó a {member_name} al equipo", "equipo", team_name)
+    return bool(ok)
+
+
+def db_update_member_role(member_id: str, new_role: str, member_name: str = "") -> bool:
+    ok = _exec("UPDATE team_members SET role = %s WHERE id = %s", (new_role, member_id))
+    if ok:
+        _log_activity("Líder", f"cambió el rol de {member_name} a {new_role}", "equipo", "")
+    return bool(ok)
+
+
+def db_move_member(member_id: str, new_team_id: str, member_name: str = "", new_team_name: str = "") -> bool:
+    ok = _exec("UPDATE team_members SET team_id = %s, role = 'Miembro' WHERE id = %s",
+               (new_team_id, member_id))
+    if ok:
+        _log_activity("Líder", f"movió a {member_name} al equipo", "equipo", new_team_name)
+    return bool(ok)
+
+
+def db_remove_member(member_id: str, member_name: str = "", team_name: str = "") -> bool:
+    ok = _exec("DELETE FROM team_members WHERE id = %s", (member_id,))
+    if ok:
+        _log_activity("Líder", f"removió a {member_name} del equipo", "equipo", team_name)
+    return bool(ok)
+
+
+def db_delete_team(team_id: str, team_name: str = "") -> bool:
+    ok = _exec("DELETE FROM teams WHERE id = %s", (team_id,))
+    if ok:
+        _log_activity("Usuario", "eliminó el equipo", "equipo", team_name)
+    return bool(ok)
+
+
+# ══════════════════════════════════════════════
+#  ACTIVIDAD
+# ══════════════════════════════════════════════
+
+def _log_activity(user_name: str, action: str, entity_type: str = "",
+                  entity_name: str = "", detail: str = "") -> None:
+    _exec("""INSERT INTO activity_log (id,user_name,action,entity_type,entity_name,detail)
+             VALUES (%s,%s,%s,%s,%s,%s)""",
+          (str(uuid.uuid4()), user_name, action, entity_type, entity_name, detail))
+
+
+def db_load_activity(limit: int = 30) -> list:
+    rows = _exec("SELECT * FROM activity_log ORDER BY created_at DESC LIMIT %s",
+                 (limit,), fetch="all")
+    for r in rows:
+        if hasattr(r.get("created_at"), "isoformat"):
+            r["created_at"] = r["created_at"].isoformat()
+    return rows
+
+
+# ══════════════════════════════════════════════
+#  DATOS DE EJEMPLO (SEED)
+# ══════════════════════════════════════════════
+
+def _get_sample_tasks() -> list:
+    today = date.today().isoformat()
+    now   = datetime.now().isoformat()
+    return [
+        {"id": str(uuid.uuid4()), "title": "Diseñar interfaz de usuario",
+         "description": "Crear mockups para la nueva aplicación", "priority": "High",
+         "category": "Diseño", "status": "Activa", "due_date": today,
+         "assignee": "Ana García", "tags": ["diseño", "UI/UX"], "created_at": now},
+        {"id": str(uuid.uuid4()), "title": "Revisar documentación del proyecto",
+         "description": "Actualizar la documentación técnica", "priority": "Medium",
+         "category": "Trabajo", "status": "Activa", "due_date": today,
+         "assignee": "", "tags": ["documentación"], "created_at": now},
+        {"id": str(uuid.uuid4()), "title": "Comprar suministros de oficina",
+         "description": "Papel, bolígrafos y carpetas", "priority": "Low",
+         "category": "Compras", "status": "Pendiente", "due_date": today,
+         "assignee": "", "tags": ["compras"], "created_at": now},
+    ]
+
+
+def seed_sample_data() -> None:
+    row = _exec("SELECT COUNT(*) AS cnt FROM tasks", fetch="one")
+    if row and int(row.get("cnt", 0)) == 0:
+        for t in _get_sample_tasks():
+            _exec("""INSERT INTO tasks (id,title,description,priority,category,status,
+                     due_date,assignee,tags,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
+                  (t["id"], t["title"], t["description"], t["priority"], t["category"],
+                   t["status"], t["due_date"], t["assignee"],
+                   json.dumps(t["tags"]), t["created_at"]))

@@ -1,24 +1,42 @@
 """
 GestorPro - Gestor de Tareas con Streamlit + Supabase (PostgreSQL)
 ==================================================================
-Versión 1.2 — Correcciones:
-  · Sidebar FIJO (sin botón de colapsar — eliminado con CSS multicapa + JS)
-  · FIX recordatorios: HTML del badge se renderizaba como texto plano
-  · FIX modo claro: textos de toggles, expanders, labels y
-    todos los elementos que quedaban blancos sobre fondo blanco
-  · Colores explícitos en TODOS los textos para que funcionen
-    correctamente en modo claro Y modo oscuro
-
+Versión 1.2
 Autores: GestorPro, equipo del segundo semestre UTEDÉ
 """
 
-import streamlit as st
 import json
-import uuid
-import os
 from datetime import datetime, date
 
-from database import get_connection, get_cursor, init_db
+import streamlit as st
+
+from database import (
+    init_db,
+    seed_sample_data,
+    db_load_tasks,
+    db_load_teams,
+    db_load_activity,
+    db_create_team,
+    db_add_member,
+    db_update_member_role,
+    db_move_member,
+    db_remove_member,
+    db_delete_team,
+)
+from logic import (
+    add_task,
+    update_task,
+    delete_task,
+    toggle_task_status,
+    get_filtered_tasks,
+    get_stats,
+    render_priority_badge,
+    render_status_badge,
+    render_tag_badge,
+    render_role_badge,
+    _hex_to_rgb,
+    _time_ago,
+)
 
 # ─────────────────────────────────────────────
 # CONFIGURACIÓN INICIAL
@@ -93,221 +111,6 @@ THEMES = {
         "--card-meta":       "#94a3b8",
     },
 }
-
-
-# ══════════════════════════════════════════════
-#  CAPA DE DATOS — Supabase
-# ══════════════════════════════════════════════
-
-def _exec(sql: str, params=(), fetch: str = "none"):
-    conn = get_connection()
-    if conn is None:
-        return [] if fetch == "all" else ({} if fetch == "one" else None)
-    cur = get_cursor(conn)
-    if cur is None:
-        return [] if fetch == "all" else ({} if fetch == "one" else None)
-    try:
-        cur.execute(sql, params)
-        if fetch == "all":
-            rows = cur.fetchall()
-            conn.commit()
-            return [dict(r) for r in rows]
-        elif fetch == "one":
-            row = cur.fetchone()
-            conn.commit()
-            return dict(row) if row else {}
-        else:
-            conn.commit()
-            return True
-    except Exception as e:
-        conn.rollback()
-        st.error(f"Error BD: {e}")
-        return [] if fetch == "all" else ({} if fetch == "one" else False)
-    finally:
-        cur.close()
-
-
-# ── TAREAS ──────────────────────────────────
-
-def db_load_tasks() -> list:
-    rows = _exec(
-        "SELECT * FROM tasks ORDER BY "
-        "CASE priority WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END, "
-        "created_at DESC",
-        fetch="all",
-    )
-    for r in rows:
-        if isinstance(r.get("tags"), str):
-            try:
-                r["tags"] = json.loads(r["tags"])
-            except Exception:
-                r["tags"] = []
-        elif r.get("tags") is None:
-            r["tags"] = []
-        if hasattr(r.get("due_date"), "isoformat"):
-            r["due_date"] = r["due_date"].isoformat()
-        if hasattr(r.get("created_at"), "isoformat"):
-            r["created_at"] = r["created_at"].isoformat()
-    return rows
-
-
-def db_add_task(title, description, priority, category, status, due_date, assignee, tags) -> bool:
-    task_id = str(uuid.uuid4())
-    ok = _exec(
-        """INSERT INTO tasks (id,title,description,priority,category,status,
-           due_date,assignee,tags,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
-        (task_id, title.strip(), description.strip(), priority, category, status,
-         due_date.isoformat() if due_date else date.today().isoformat(),
-         assignee.strip(), json.dumps(tags, ensure_ascii=False), datetime.now().isoformat()),
-    )
-    if ok:
-        _log_activity(assignee.strip() or "Sistema", "creó la tarea", "tarea", title.strip())
-    return bool(ok)
-
-
-def db_update_task(task_id: str, **kwargs) -> bool:
-    if "tags" in kwargs:
-        kwargs["tags"] = json.dumps(kwargs["tags"], ensure_ascii=False)
-    if not kwargs:
-        return False
-    set_parts = [f"{k} = %s::jsonb" if k == "tags" else f"{k} = %s" for k in kwargs]
-    ok = _exec(f"UPDATE tasks SET {', '.join(set_parts)} WHERE id = %s",
-               list(kwargs.values()) + [task_id])
-    if ok:
-        _log_activity("Usuario", "actualizó la tarea", "tarea", kwargs.get("title", task_id))
-    return bool(ok)
-
-
-def db_delete_task(task_id: str, task_title: str = "") -> bool:
-    ok = _exec("DELETE FROM tasks WHERE id = %s", (task_id,))
-    if ok:
-        _log_activity("Usuario", "eliminó la tarea", "tarea", task_title or task_id)
-    return bool(ok)
-
-
-def db_toggle_task_status(task_id: str, current_status: str, title: str = "") -> bool:
-    new_status = "Activa" if current_status == "Completada" else "Completada"
-    action = "completó la tarea" if new_status == "Completada" else "reactivó la tarea"
-    ok = _exec("UPDATE tasks SET status = %s WHERE id = %s", (new_status, task_id))
-    if ok:
-        _log_activity("Usuario", action, "tarea", title)
-    return bool(ok)
-
-
-# ── EQUIPOS ─────────────────────────────────
-
-def db_load_teams() -> list:
-    teams = _exec("SELECT * FROM teams ORDER BY created_at DESC", fetch="all")
-    for team in teams:
-        if hasattr(team.get("created_at"), "isoformat"):
-            team["created_at"] = team["created_at"].isoformat()
-        members = _exec(
-            "SELECT * FROM team_members WHERE team_id = %s ORDER BY role",
-            (team["id"],), fetch="all",
-        )
-        for m in members:
-            if hasattr(m.get("joined_at"), "isoformat"):
-                m["joined_at"] = m["joined_at"].isoformat()
-        team["members"] = members
-    return teams
-
-
-def db_create_team(name: str, description: str, leader_name: str) -> bool:
-    team_id = str(uuid.uuid4())
-    ok = _exec("INSERT INTO teams (id,name,description) VALUES (%s,%s,%s)",
-               (team_id, name.strip(), description.strip()))
-    if ok and leader_name.strip():
-        _exec("INSERT INTO team_members (id,team_id,member_name,role) VALUES (%s,%s,%s,%s)",
-              (str(uuid.uuid4()), team_id, leader_name.strip(), "Líder"))
-        _log_activity(leader_name, "creó el equipo", "equipo", name.strip())
-    return bool(ok)
-
-
-def db_add_member(team_id: str, member_name: str, role: str, team_name: str = "") -> bool:
-    ok = _exec("INSERT INTO team_members (id,team_id,member_name,role) VALUES (%s,%s,%s,%s)",
-               (str(uuid.uuid4()), team_id, member_name.strip(), role))
-    if ok:
-        _log_activity("Usuario", f"agregó a {member_name} al equipo", "equipo", team_name)
-    return bool(ok)
-
-
-def db_update_member_role(member_id: str, new_role: str, member_name: str = "") -> bool:
-    ok = _exec("UPDATE team_members SET role = %s WHERE id = %s", (new_role, member_id))
-    if ok:
-        _log_activity("Líder", f"cambió el rol de {member_name} a {new_role}", "equipo", "")
-    return bool(ok)
-
-
-def db_move_member(member_id: str, new_team_id: str, member_name: str = "", new_team_name: str = "") -> bool:
-    ok = _exec("UPDATE team_members SET team_id = %s, role = 'Miembro' WHERE id = %s",
-               (new_team_id, member_id))
-    if ok:
-        _log_activity("Líder", f"movió a {member_name} al equipo", "equipo", new_team_name)
-    return bool(ok)
-
-
-def db_remove_member(member_id: str, member_name: str = "", team_name: str = "") -> bool:
-    ok = _exec("DELETE FROM team_members WHERE id = %s", (member_id,))
-    if ok:
-        _log_activity("Líder", f"removió a {member_name} del equipo", "equipo", team_name)
-    return bool(ok)
-
-
-def db_delete_team(team_id: str, team_name: str = "") -> bool:
-    ok = _exec("DELETE FROM teams WHERE id = %s", (team_id,))
-    if ok:
-        _log_activity("Usuario", "eliminó el equipo", "equipo", team_name)
-    return bool(ok)
-
-
-# ── ACTIVIDAD ────────────────────────────────
-
-def _log_activity(user_name: str, action: str, entity_type: str = "",
-                  entity_name: str = "", detail: str = "") -> None:
-    _exec("""INSERT INTO activity_log (id,user_name,action,entity_type,entity_name,detail)
-             VALUES (%s,%s,%s,%s,%s,%s)""",
-          (str(uuid.uuid4()), user_name, action, entity_type, entity_name, detail))
-
-
-def db_load_activity(limit: int = 30) -> list:
-    rows = _exec("SELECT * FROM activity_log ORDER BY created_at DESC LIMIT %s",
-                 (limit,), fetch="all")
-    for r in rows:
-        if hasattr(r.get("created_at"), "isoformat"):
-            r["created_at"] = r["created_at"].isoformat()
-    return rows
-
-
-# ── DATOS DEMO ───────────────────────────────
-
-def _get_sample_tasks() -> list:
-    today = date.today().isoformat()
-    now   = datetime.now().isoformat()
-    return [
-        {"id": str(uuid.uuid4()), "title": "Diseñar interfaz de usuario",
-         "description": "Crear mockups para la nueva aplicación", "priority": "High",
-         "category": "Diseño", "status": "Activa", "due_date": today,
-         "assignee": "Ana García", "tags": ["diseño", "UI/UX"], "created_at": now},
-        {"id": str(uuid.uuid4()), "title": "Revisar documentación del proyecto",
-         "description": "Actualizar la documentación técnica", "priority": "Medium",
-         "category": "Trabajo", "status": "Activa", "due_date": today,
-         "assignee": "", "tags": ["documentación"], "created_at": now},
-        {"id": str(uuid.uuid4()), "title": "Comprar suministros de oficina",
-         "description": "Papel, bolígrafos y carpetas", "priority": "Low",
-         "category": "Compras", "status": "Pendiente", "due_date": today,
-         "assignee": "", "tags": ["compras"], "created_at": now},
-    ]
-
-
-def seed_sample_data() -> None:
-    row = _exec("SELECT COUNT(*) AS cnt FROM tasks", fetch="one")
-    if row and int(row.get("cnt", 0)) == 0:
-        for t in _get_sample_tasks():
-            _exec("""INSERT INTO tasks (id,title,description,priority,category,status,
-                     due_date,assignee,tags,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
-                  (t["id"], t["title"], t["description"], t["priority"], t["category"],
-                   t["status"], t["due_date"], t["assignee"],
-                   json.dumps(t["tags"]), t["created_at"]))
 
 
 # ══════════════════════════════════════════════
@@ -403,107 +206,83 @@ def inject_css() -> None:
         display: none !important;
         visibility: hidden !important;
         pointer-events: none !important;
+        opacity: 0 !important;
         width: 0 !important;
         height: 0 !important;
         overflow: hidden !important;
         position: absolute !important;
-        opacity: 0 !important;
     }}
 
-    /* ══════════════════════════════════════════
-       SIDEBAR FIJO — CAPA 2: forzar visible
-       Tanto en estado expandido como colapsado,
-       el sidebar mantiene su ancho y posición.
-    ══════════════════════════════════════════ */
-    section[data-testid="stSidebar"],
+    /* CAPA 2 — CSS aria-expanded */
     section[data-testid="stSidebar"][aria-expanded="false"] {{
-        background: var(--bg-sidebar) !important;
-        border-right: 1px solid rgba(255,255,255,0.08) !important;
-        min-width: 240px !important;
-        max-width: 280px !important;
         transform: none !important;
         left: 0 !important;
+        min-width: 240px !important;
         visibility: visible !important;
         display: block !important;
-        transition: none !important;
     }}
 
-    /* Todos los textos del sidebar en color claro */
-    section[data-testid="stSidebar"],
-    section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] span,
-    section[data-testid="stSidebar"] div,
-    section[data-testid="stSidebar"] label {{
-        color: var(--text-sidebar) !important;
+    /* ── Sidebar general ── */
+    section[data-testid="stSidebar"] {{
+        background: var(--bg-sidebar) !important;
+        min-width: 240px !important;
+        padding: 1.25rem 1rem !important;
     }}
     section[data-testid="stSidebar"] .stButton > button {{
-        color: white !important;
+        background: transparent !important;
+        color: var(--text-sidebar) !important;
+        border: none !important;
+        border-radius: 8px !important;
+        text-align: left !important;
+        font-size: 0.9rem !important;
+        font-weight: 500 !important;
+        padding: 0.5rem 0.75rem !important;
+        width: 100% !important;
+        transition: background 0.15s !important;
+        box-shadow: none !important;
+    }}
+    section[data-testid="stSidebar"] .stButton > button:hover {{
+        background: rgba(255,255,255,0.08) !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }}
+    section[data-testid="stSidebar"] .stToggle label,
+    section[data-testid="stSidebar"] .stToggle p {{
+        color: var(--text-sidebar) !important;
+        font-family: 'Sora', sans-serif !important;
+        font-size: 0.88rem !important;
     }}
 
-    /* ── Área principal ── */
+    /* ── Main content ── */
     .main .block-container {{
         padding: 1.5rem 2rem !important;
-        max-width: 100% !important;
-        background: var(--bg-main) !important;
+        max-width: 1400px !important;
     }}
 
-    /* ══════════════════════════════════════════
-       COLORES MODO CLARO — corrección global
-    ══════════════════════════════════════════ */
-
-    .main p, .main span:not(.badge), .main div:not([class*="st"]) {{
-        color: var(--text-primary);
+    /* ── Inputs ── */
+    .stTextInput > div > div > input,
+    .stTextArea > div > div > textarea {{
+        background: var(--input-bg) !important;
+        border-color: var(--input-border) !important;
+        color: var(--text-primary) !important;
+        border-radius: 8px !important;
+        font-family: 'Sora', sans-serif !important;
+        font-size: 0.88rem !important;
     }}
-
-    h1, h2, h3, h4, h5, h6 {{
+    .stTextInput label, .stTextArea label,
+    .stDateInput label, .stSelectbox label {{
         color: var(--text-primary) !important;
         font-family: 'Sora', sans-serif !important;
-        font-weight: 700 !important;
-    }}
-
-    .stTextInput > label,
-    .stTextArea > label,
-    .stSelectbox > label,
-    .stDateInput > label,
-    .stNumberInput > label,
-    .stRadio > label,
-    .stCheckbox > label,
-    label[data-testid] {{
-        color: var(--text-primary) !important;
-        font-family: 'Sora', sans-serif !important;
-        font-size: 0.85rem !important;
+        font-size: 0.84rem !important;
         font-weight: 500 !important;
     }}
 
-    .stTextInput > div > div > input,
-    .stTextArea > div > div > textarea,
-    .stSelectbox > div > div > div,
+    /* ── Date input ── */
     .stDateInput > div > div > input {{
         background: var(--input-bg) !important;
-        border: 1.5px solid var(--input-border) !important;
-        border-radius: 10px !important;
+        border-color: var(--input-border) !important;
         color: var(--text-primary) !important;
-        font-family: 'Sora', sans-serif !important;
-        padding: 0.6rem 1rem !important;
-        transition: border-color 0.2s, box-shadow 0.2s;
-    }}
-    .stTextInput > div > div > input:focus,
-    .stTextArea > div > div > textarea:focus {{
-        border-color: var(--accent-primary) !important;
-        box-shadow: 0 0 0 3px rgba(229,90,43,0.15) !important;
-    }}
-    .stTextInput > div > div > input::placeholder,
-    .stTextArea > div > div > textarea::placeholder {{
-        color: var(--text-secondary) !important;
-        opacity: 1 !important;
-    }}
-
-    /* ── Toggles ── */
-    div[data-testid="stToggle"] > label,
-    div[data-testid="stToggle"] label,
-    div[data-testid="stToggle"] p,
-    div[data-testid="stToggle"] span {{
-        color: var(--toggle-label) !important;
+        border-radius: 8px !important;
         font-family: 'Sora', sans-serif !important;
     }}
 
@@ -841,9 +620,6 @@ def inject_css() -> None:
 
     # ══════════════════════════════════════════
     # CAPA 3 — JavaScript MutationObserver
-    # Elimina el botón de colapsar cada vez que
-    # Streamlit lo vuelva a insertar tras un rerun
-    # y revierte el sidebar si quedó colapsado.
     # ══════════════════════════════════════════
     js = """
     <script>
@@ -870,7 +646,6 @@ def inject_css() -> None:
                 });
             });
 
-            // Revertir sidebar si Streamlit lo colapso
             var sidebar = document.querySelector('section[data-testid="stSidebar"]');
             if (sidebar) {
                 if (sidebar.getAttribute('aria-expanded') === 'false') {
@@ -884,16 +659,13 @@ def inject_css() -> None:
             }
         }
 
-        // Ejecutar al cargar
         removeCollapseBtn();
 
-        // Observar cambios del DOM en tiempo real
         var observer = new MutationObserver(function(mutations) {
             removeCollapseBtn();
         });
         observer.observe(document.body, { childList: true, subtree: true });
 
-        // Respaldo adicional: ejecutar cada 500ms durante los primeros 5 segundos
         var count = 0;
         var interval = setInterval(function() {
             removeCollapseBtn();
@@ -909,101 +681,8 @@ def inject_css() -> None:
 
 
 # ══════════════════════════════════════════════
-#  HELPERS CRUD
-# ══════════════════════════════════════════════
-
-def add_task(title, description, priority, category, status, due_date, assignee, tags):
-    if db_add_task(title, description, priority, category, status, due_date, assignee, tags):
-        st.session_state.tasks = db_load_tasks()
-
-
-def update_task(task_id, **kwargs):
-    if db_update_task(task_id, **kwargs):
-        st.session_state.tasks = db_load_tasks()
-
-
-def delete_task(task_id, task_title=""):
-    if db_delete_task(task_id, task_title):
-        st.session_state.tasks = db_load_tasks()
-
-
-def toggle_task_status(task_id, current_status, title=""):
-    if db_toggle_task_status(task_id, current_status, title):
-        st.session_state.tasks = db_load_tasks()
-
-
-def get_filtered_tasks(status_filter="Todas", category_filter="Todas", search="") -> list:
-    prio  = {"High": 0, "Medium": 1, "Low": 2}
-    tasks = st.session_state.tasks.copy()
-    if status_filter != "Todas":
-        tasks = [t for t in tasks if t["status"] == status_filter]
-    if category_filter != "Todas":
-        tasks = [t for t in tasks if t["category"] == category_filter]
-    if search:
-        s = search.lower()
-        tasks = [t for t in tasks if s in t["title"].lower()
-                 or s in t.get("description","").lower()
-                 or s in " ".join(t.get("tags",[])).lower()]
-    return sorted(tasks, key=lambda x: prio.get(x["priority"], 99))
-
-
-def get_stats() -> dict:
-    tasks     = st.session_state.tasks
-    total     = len(tasks)
-    completed = sum(1 for t in tasks if t["status"] == "Completada")
-    pending   = sum(1 for t in tasks if t["status"] == "Pendiente")
-    active    = sum(1 for t in tasks if t["status"] == "Activa")
-    return {"total": total, "completed": completed, "pending": pending,
-            "active": active,
-            "completion_rate": round(completed / total * 100) if total else 0}
-
-
-# ══════════════════════════════════════════════
 #  COMPONENTES UI
 # ══════════════════════════════════════════════
-
-def render_priority_badge(priority: str) -> str:
-    icons = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}
-    return (f'<span class="badge badge-priority-{priority.lower()}">'
-            f'{icons.get(priority,"⚪")} {priority}</span>')
-
-
-def render_status_badge(status: str) -> str:
-    icons = {"Pendiente": "⏳", "Activa": "🔵", "Completada": "✅"}
-    return (f'<span class="badge badge-status-{status.lower()}">'
-            f'{icons.get(status,"")} {status}</span>')
-
-
-def render_tag_badge(tag: str) -> str:
-    return f'<span class="badge badge-tag">#{tag}</span>'
-
-
-def render_role_badge(role: str) -> str:
-    colors = {"Líder": "#e55a2b", "Editor": "#0d9488", "Viewer": "#6b7280", "Miembro": "#3b82f6"}
-    color  = colors.get(role, "#6b7280")
-    return (f'<span class="badge" style="background:rgba(0,0,0,0.06);'
-            f'color:{color};border:1px solid {color}40;">{role}</span>')
-
-
-def _hex_to_rgb(hex_color: str):
-    h = hex_color.lstrip("#")
-    try:
-        return int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
-    except Exception:
-        return 0, 0, 0
-
-
-def _time_ago(created_at_str: str) -> str:
-    try:
-        dt   = datetime.fromisoformat(str(created_at_str)[:19])
-        diff = int((datetime.now() - dt).total_seconds())
-        if diff < 60:    return f"Hace {diff} seg"
-        if diff < 3600:  return f"Hace {diff//60} min"
-        if diff < 86400: return f"Hace {diff//3600} h"
-        return f"Hace {diff//86400} días"
-    except Exception:
-        return "Recientemente"
-
 
 def render_task_card(task: dict) -> None:
     is_completed = task["status"] == "Completada"
@@ -1824,6 +1503,7 @@ def render_config_page() -> None:
             )
         with col_reset:
             if st.button("🔄 Datos de ejemplo", key="reset_data", use_container_width=True):
+                from database import _exec
                 _exec("DELETE FROM tasks")
                 seed_sample_data()
                 st.session_state.tasks = db_load_tasks()
