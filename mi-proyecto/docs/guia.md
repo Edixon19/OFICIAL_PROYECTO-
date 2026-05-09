@@ -1,36 +1,124 @@
-# Guía de implementación con MkDocs
+# 🚀 Guía de Uso — GestorPro
 
-- Al tener ya creado nuestro entorno virtual, primero instalamos las herramientas necesarias ejecutando pip install mkdocs mkdocs-material. Una vez instalado, ejecuta el comando mkdocs new . en la raíz de tu proyecto para generar la estructura inicial de archivos.
+Esta guía explica cómo usar cada sección de GestorPro paso a paso.
 
-## Configuración del archivo mkdocs.yml
+---
 
-Este es el "cerebro" de el sitio. Aquí configuras el nombre del proyecto y, lo más importante, la navegación. Para crear rutas, abre este archivo y utiliza el bloque nav de esta forma:
+## 📊 Dashboard
 
-![Imagen sobre como debe estar estructurado el archivo "mkdocs.yml"](imagenes/imagen_archivoyml.png)
+Al abrir la aplicación aterrizas en el **Dashboard**. Aquí encontrarás:
 
-- Recuerda que no es necesario tener las mismas rutas de la imagen, puedes crear tus propias rutas con los nombres que tú quieras, lo importante es que para cada ruta que pongas en el archivo mkdocs.md debe estar creado un archivo dentro de la carpeta "docs" que contenga el mismo nombre y la extensión (.md")
+- **Acciones rápidas** — Botones para crear una tarea o un equipo en un clic
+- **4 KPIs en tiempo real** — Tareas completadas, pendientes, activas y tasa de finalización
+- **Gráfica de barras** — Distribución de tareas por categoría
+- **Distribución por estado** — Barras de progreso con porcentajes
+- **Tareas recientes** — Las últimas 4 tareas creadas
 
-## Edición de la página principal (index.md)
+---
 
-- Dentro de la carpeta docs encontrarás el archivo index.md. Este es la sección principal del sitio. Puedes editarlo libremente usando Markdown:
+## ✅ Tareas
 
-- Para un título grande usa #.
+### Crear una tarea
 
-- Para subtítulos usa ##.
+1. Haz clic en **➕ Nueva Tarea** (arriba a la derecha)
+2. Rellena el formulario:
+   - **Título** *(obligatorio)*
+   - Descripción, asignado a, prioridad, categoría, estado inicial, fecha límite
+   - Etiquetas separadas por coma (ej: `diseño, urgente`)
+3. Haz clic en **✅ Crear Tarea**
 
-- Para negritas usa **texto**.
+### Filtrar tareas
 
-- Para listas usa - elemento.
-- para escribir como el efecto de código usa ``` adelante y al final del texto. 
+- Usa la **barra de búsqueda** para filtrar por título, descripción o etiquetas
+- Selecciona un **estado** con los botones de radio (Todas / Activa / Pendiente / Completada)
+- Usa el **selector de categoría** para filtrar por área
 
-## Cómo escribir y añadir páginas
+### Completar una tarea
 
-Para crear nuevas secciones, simplemente crea un nuevo archivo con extensión .md dentro de la carpeta docs (por ejemplo, guia.md). Una vez creado, recuerda agregarlo al archivo mkdocs.yml en la sección nav que vimos antes para que aparezca en el menú superior.
+Haz clic en **✓ Completar** en la tarjeta de la tarea. La tarjeta aparecerá con texto tachado y opacidad reducida. Para revertirla haz clic en **↩ Reactivar**.
 
-## Visualización
+### Editar una tarea
 
-Para ver cómo va quedando tu trabajo, ejecuta en la terminal:
-mkdocs serve
+1. Haz clic en **✏️ Editar** en la tarjeta
+2. Modifica los campos en el formulario desplegable
+3. Haz clic en **💾 Guardar**
 
-Esto abrirá un servidor local (usualmente en http://127.0.0.1:8000). Cada vez que guardes cambios en cualquiera de tus archivos .md o en el yml, el navegador se actualizará automáticamente.
+### Eliminar una tarea
 
+1. Haz clic en **🗑️ Eliminar**
+2. Confirma haciendo clic en **Sí, eliminar** en la caja de confirmación
+
+!!! danger "Atención"
+    La eliminación de tareas es permanente y no se puede deshacer.
+
+---
+
+## 📅 Calendario
+
+Muestra todas las tareas que tienen fecha límite asignada, agrupadas por día en orden cronológico. Las tareas del **día de hoy** se marcan con 🔵 HOY. Cada tarea muestra un borde de color según su categoría.
+
+---
+
+## 👥 Equipos
+
+### Crear un equipo
+
+1. Haz clic en **➕ Nuevo Equipo**
+2. Ingresa nombre, descripción y tu nombre (serás el Líder)
+3. Haz clic en **✅ Crear Equipo**
+
+### Gestionar un equipo
+
+Haz clic en **⚙️ Gestionar** en la tarjeta del equipo para abrir el panel:
+
+=== "Agregar miembro"
+    - Ingresa el nombre del miembro
+    - Selecciona su rol: Líder, Miembro, Editor o Viewer
+    - Haz clic en **Agregar**
+
+=== "Gestionar miembros"
+    - **Cambiar rol**: Selecciona el nuevo rol en el desplegable y confirma con ✓
+    - **Mover a otro equipo**: Selecciona el equipo destino y haz clic en ↗ Mover
+    - **Remover**: Haz clic en ✕ junto al miembro
+
+### Roles disponibles
+
+| Rol | Permisos |
+|---|---|
+| 👑 **Líder** | Gestiona el equipo y sus miembros |
+| ✏️ **Editor** | Puede editar tareas del equipo |
+| 👤 **Miembro** | Participa en el equipo |
+| 👁️ **Viewer** | Solo lectura |
+
+---
+
+## 🔔 Recordatorios
+
+Lista todas las tareas con fecha límite ordenadas cronológicamente:
+
+- 🚨 **Fondo rojo** — Tarea vencida (fecha pasada y no completada)
+- ⏰ **Fondo amarillo** — Tarea con vencimiento hoy
+- 🔔 **Normal** — Tarea futura
+
+---
+
+## ⚡ Actividad
+
+Muestra el log de las últimas **30 acciones** realizadas en el sistema (crear, editar, completar, eliminar tareas y equipos). Incluye:
+- Quién realizó la acción
+- Qué se hizo y sobre qué objeto
+- Cuándo ocurrió (tiempo relativo)
+
+Haz clic en **🔄 Actualizar** para forzar un refresco.
+
+---
+
+## ⚙️ Configuración
+
+| Sección | Qué puedes hacer |
+|---|---|
+| 👤 Perfil | Editar nombre y email (demo) |
+| 🔔 Notificaciones | Activar/desactivar tipos de notificación |
+| 🎨 Apariencia | Alternar modo oscuro/claro |
+| 🗄️ Gestión de Datos | Exportar tareas a JSON · Restaurar datos de ejemplo |
+| 🔌 Base de Datos | Ver estado de conexión · Reconectar a Supabase |

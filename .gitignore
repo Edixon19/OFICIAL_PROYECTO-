@@ -6,3 +6,9 @@ prueba
 conexion_mysql.py
 database.py
 conexion_mysql
+
+# MkDocs generated site (auto-generated, do not commit)
+mi-proyecto/site/
+
+# IDE files
+.idea/

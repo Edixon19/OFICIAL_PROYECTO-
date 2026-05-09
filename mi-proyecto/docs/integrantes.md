@@ -1,10 +1,30 @@
-# Integrantes
+# 👥 Integrantes del Equipo
 
-- ```El único integrante de esta prueba de conexión a través de mkdocs soy yo; es decir, Edixon.```
+GestorPro fue desarrollado por el equipo del **Segundo Semestre de UTEDÉ**.
 
-!["Imagen del autor"](imagenes/fotomía.png)
+---
 
-<audio controls autoplay>
-  <source src="/musica/canciondedinos.mp3" type="audio/mpeg">
-  Tu navegador no soporta el elemento de audio.
-</audio>
+## 🧑‍💻 Equipo de Desarrollo
+
+| Nombre | Rol en el proyecto | GitHub |
+|---|---|---|
+| **Edixon** | Desarrollador principal · Arquitecto de la aplicación | [@Edixon19](https://github.com/Edixon19) |
+
+---
+
+## 🏫 Información académica
+
+- **Institución:** UTEDÉ
+- **Semestre:** Segundo semestre
+- **Proyecto:** GestorPro — Gestor de Tareas con Streamlit + Supabase
+- **Versión:** 1.2
+
+---
+
+## 🙌 Agradecimientos
+
+A los profesores y compañeros del segundo semestre de UTEDÉ por el apoyo durante el desarrollo de este proyecto.
+
+---
+
+> ¿Quieres contribuir? Abre un [Pull Request](https://github.com/Edixon19/OFICIAL_PROYECTO-) en el repositorio.
