@@ -375,33 +375,149 @@ def inject_css() -> None:
         background: var(--hover-bg) !important;
     }}
 
-    /* ── Botones ── */
+    /* ══════════════════════════════════════════
+       JERARQUÍA DE BOTONES — 4 niveles cognitivos
+       Nivel 1 Primary   → gradiente naranja-teal  (acción principal / CTA)
+       Nivel 2 Secondary → borde teal, fondo transp (acción reversible)
+       Nivel 3 Ghost     → borde sutil, texto muted  (cancelar / bajo peso)
+       Nivel 4 Danger    → rojo                      (destructivo)
+    ══════════════════════════════════════════ */
+
+    /* ── Nivel 2 SECONDARY: base predeterminada para todos los botones ── */
     .stButton > button {{
-        background: var(--accent-gradient) !important;
-        color: white !important;
-        border: none !important;
+        background: transparent !important;
+        color: #0d9488 !important;
+        border: 1.5px solid #0d9488 !important;
         border-radius: 10px !important;
         font-family: 'Sora', sans-serif !important;
         font-weight: 600 !important;
-        font-size: 0.9rem !important;
-        padding: 0.55rem 1.4rem !important;
+        font-size: 0.88rem !important;
+        padding: 0.5rem 1.2rem !important;
         cursor: pointer !important;
-        transition: opacity 0.2s, transform 0.15s !important;
+        transition: background 0.18s, box-shadow 0.18s, transform 0.15s, opacity 0.18s !important;
     }}
     .stButton > button:hover {{
-        opacity: 0.9 !important;
+        background: rgba(13,148,136,0.09) !important;
         transform: translateY(-1px) !important;
-        box-shadow: 0 4px 14px rgba(229,90,43,0.35) !important;
+        box-shadow: 0 3px 10px rgba(13,148,136,0.2) !important;
     }}
 
-    /* ── Download button ── */
-    .stDownloadButton > button {{
-        background: var(--accent-gradient) !important;
+    /* ── Nivel 1 PRIMARY: CTAs principales ── */
+    /* Streamlit expone el key como clase .st-key en el wrapper del widget */
+    .st-key-btn_create_task button,
+    .st-key-dash_new_task button,
+    .st-key-dash_new_team button,
+    .st-key-open_new_task button,
+    .st-key-open_new_team button,
+    .st-key-btn_create_team button,
+    .st-key-new_reminder_btn button,
+    .st-key-save_profile button,
+    .st-key-save_notifs button,
+    .st-key-refresh_activity button,
+    .st-key-reconnect_db button {{
+        background: #262525 !important;
         color: white !important;
         border: none !important;
+         
+    }}
+    .st-key-btn_create_task button:hover,
+    .st-key-dash_new_task button:hover,
+    .st-key-dash_new_team button:hover,
+    .st-key-open_new_task button:hover,
+    .st-key-open_new_team button:hover,
+    .st-key-btn_create_team button:hover,
+    .st-key-new_reminder_btn button:hover,
+    .st-key-save_profile button:hover,
+    .st-key-save_notifs button:hover,
+    .st-key-refresh_activity button:hover,
+    .st-key-reconnect_db button:hover {{
+        background: #262525 !important;
+        transform: translateY(-1px) !important;
+    }}
+
+    /* save_{{taskid}} (guardar edicion tarea) — Primary */
+    [class*="st-key-save_"] button {{
+        background: #e55a2b !important;
+        color: white !important;
+        border: none !important;
+        box-shadow: 0 2px 8px rgba(229,90,43,0.22) !important;
+    }}
+    [class*="st-key-save_"] button:hover {{
+        background: #c94d22 !important;
+        box-shadow: 0 4px 16px rgba(229,90,43,0.38) !important;
+        transform: translateY(-1px) !important;
+    }}
+
+    /* ── Nivel 3 GHOST: cancelar / bajo peso visual ── */
+    .st-key-btn_cancel_new button,
+    .st-key-btn_cancel_team button,
+    [class*="st-key-cancel_edit_"] button,
+    [class*="st-key-confirm_no_"] button,
+    [class*="st-key-conf_no_team_"] button {{
+        background: transparent !important;
+        color: var(--text-secondary) !important;
+        border: 1.5px solid var(--border-color) !important;
+        box-shadow: none !important;
+    }}
+    .st-key-btn_cancel_new button:hover,
+    .st-key-btn_cancel_team button:hover,
+    [class*="st-key-cancel_edit_"] button:hover,
+    [class*="st-key-confirm_no_"] button:hover,
+    [class*="st-key-conf_no_team_"] button:hover {{
+        background: var(--hover-bg) !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }}
+
+    /* ── Nivel 4 DANGER: acciones destructivas ── */
+    [class*="st-key-delete_btn_"] button,
+    [class*="st-key-del_team_"] button,
+    [class*="st-key-confirm_yes_"] button,
+    [class*="st-key-conf_del_team_"] button,
+    [class*="st-key-remove_member_"] button {{
+        background: rgba(239,68,68,0.08) !important;
+        color: #ef4444 !important;
+        border: 1.5px solid rgba(239,68,68,0.4) !important;
+        box-shadow: none !important;
+    }}
+    [class*="st-key-delete_btn_"] button:hover,
+    [class*="st-key-del_team_"] button:hover,
+    [class*="st-key-confirm_yes_"] button:hover,
+    [class*="st-key-conf_del_team_"] button:hover,
+    [class*="st-key-remove_member_"] button:hover {{
+        background: rgba(239,68,68,0.16) !important;
+        border-color: #ef4444 !important;
+        box-shadow: 0 3px 10px rgba(239,68,68,0.25) !important;
+        transform: translateY(-1px) !important;
+    }}
+
+    /* ── reset_data — Advertencia (accion reversible pero llamativa) ── */
+    .st-key-reset_data button {{
+        background: rgba(245,158,11,0.1) !important;
+        color: #d97706 !important;
+        border: 1.5px solid rgba(245,158,11,0.4) !important;
+        box-shadow: none !important;
+    }}
+    .st-key-reset_data button:hover {{
+        background: rgba(245,158,11,0.18) !important;
+        border-color: #d97706 !important;
+        box-shadow: 0 3px 10px rgba(245,158,11,0.25) !important;
+        transform: translateY(-1px) !important;
+    }}
+
+    /* ── Download button (Secondary igual) ── */
+    .stDownloadButton > button {{
+        background: transparent !important;
+        color: #0d9488 !important;
+        border: 1.5px solid #0d9488 !important;
         border-radius: 10px !important;
         font-family: 'Sora', sans-serif !important;
         font-weight: 600 !important;
+        transition: background 0.18s, box-shadow 0.18s !important;
+    }}
+    .stDownloadButton > button:hover {{
+        background: rgba(13,148,136,0.09) !important;
+        box-shadow: 0 3px 10px rgba(13,148,136,0.2) !important;
     }}
 
     /* ── Cards de stats ── */
