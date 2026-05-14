@@ -1,24 +1,23 @@
 import streamlit as st
-from supabase import create_client, Client
+import streamlit.components.v1 as components
+from supabase import create_client
 import urllib.parse
 import time
 
 # ============================================
 # CONFIGURACIÓN DE CREDENCIALES (SECRETS)
 # ============================================
-# Usamos st.secrets para que funcione tanto local como en Streamlit Cloud
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_ANON_KEY = st.secrets["SUPABASE_KEY"]
 except:
-    # Respaldo manual solo por si no has configurado los secrets aún
     SUPABASE_URL = "https://wopthjsdceattleaeczt.supabase.co"
     SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvcHRoanNkY2VhdHRsZWFlY3p0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MzM3NjYsImV4cCI6MjA5MjMwOTc2Nn0.QNCHhCzedHSGPul5S-JWZUo3jEV6959tWoKEEeNHztA"
 
 st.set_page_config(page_title="Nueva Contraseña — GestorPro", page_icon="🔐", layout="centered")
 
 # ============================================
-# DISEÑO CSS PERSONALIZADO
+# CSS PERSONALIZADO
 # ============================================
 st.markdown("""
 <style>
@@ -71,44 +70,7 @@ def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # ============================================
-# LÓGICA DE CAPTURA DEL TOKEN (HASH)
-# ============================================
-hash_value = st.query_params.get("_hash", "")
-
-if not hash_value:
-    # Este iframe captura el token que Supabase manda después del # y lo pasa a una query param
-    st.markdown("""
-    <iframe srcdoc='
-    <script>
-        const hash = window.parent.location.hash.substring(1);
-        if (hash) {
-            const url = new URL(window.parent.location.href);
-            url.searchParams.set("_hash", hash);
-            window.parent.location.replace(url);
-        }
-    </script>
-    ' style="display:none;"></iframe>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div class="auth-logo-wrap">
-        <div class="auth-logo-icon">GP</div>
-        <div class="auth-app-title">Verificando...</div>
-        <div class="auth-app-sub">Espera un momento mientras validamos el enlace</div>
-    </div>
-    """, unsafe_allow_html=True)
-    time.sleep(1) # Pequeña pausa para que el JS actúe
-    st.stop()
-
-# Parsear los parámetros del hash
-hash_params = {}
-for item in hash_value.split('&'):
-    if '=' in item:
-        key, value = item.split('=', 1)
-        hash_params[key] = urllib.parse.unquote(value)
-
-# ============================================
-# INTERFAZ DE USUARIO
+# LOGO / HEADER
 # ============================================
 st.markdown("""
 <div class="auth-logo-wrap">
@@ -118,37 +80,79 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Verificar si el token es de recuperación
-if "access_token" in hash_params and (hash_params.get("type") == "recovery" or hash_params.get("type") == "signup"):
-    access_token = hash_params["access_token"]
+# ============================================
+# CAPTURA DEL HASH — SOLUCIÓN ROBUSTA
+# ============================================
+# Supabase pone el token en el fragment (#access_token=...) que NUNCA
+# llega al servidor. Usamos st.components para leer el hash desde el
+# navegador y redirigir añadiéndolo como query param ?_hash=...
+# ============================================
+
+hash_value = st.query_params.get("_hash", "")
+
+if not hash_value:
+    # Inyectamos JS directamente en la página (sin iframe) para capturar el hash
+    components.html(
+        """
+        <script>
+            const hash = window.location.hash.substring(1);
+            if (hash && hash.includes('access_token')) {
+                // Construir la URL nueva con el hash como query param
+                const currentUrl = window.location.href.split('#')[0].split('?')[0];
+                const newUrl = currentUrl + '?_hash=' + encodeURIComponent(hash);
+                window.location.replace(newUrl);
+            }
+        </script>
+        """,
+        height=0,
+    )
+
+    st.markdown("""
+    <div style="text-align:center; margin-top: 2rem; color:#475569; font-size:0.9rem;">
+        ⏳ Validando el enlace de recuperación...
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
+
+# ============================================
+# PARSEAR LOS PARÁMETROS DEL HASH
+# ============================================
+hash_params = {}
+decoded_hash = urllib.parse.unquote(hash_value)
+for item in decoded_hash.split('&'):
+    if '=' in item:
+        key, value = item.split('=', 1)
+        hash_params[key] = urllib.parse.unquote(value)
+
+# ============================================
+# FORMULARIO DE NUEVA CONTRASEÑA
+# ============================================
+if "access_token" in hash_params and hash_params.get("type") in ("recovery", "signup"):
+    access_token  = hash_params["access_token"]
     refresh_token = hash_params.get("refresh_token", "")
-    
-    with st.container():
-        new_pw = st.text_input("Nueva contraseña", type="password", placeholder="Mínimo 6 caracteres")
-        confirm_pw = st.text_input("Confirmar contraseña", type="password", placeholder="Repite tu contraseña")
-        
-        if st.button("Actualizar contraseña", use_container_width=True):
-            if len(new_pw) < 6:
-                st.error("⚠️ La contraseña debe tener al menos 6 caracteres.")
-            elif new_pw != confirm_pw:
-                st.error("⚠️ Las contraseñas no coinciden.")
-            else:
-                try:
-                    sb = get_supabase()
-                    # Validar sesión con el token recibido
-                    sb.auth.set_session(access_token, refresh_token)
-                    # Actualizar la contraseña del usuario actual
-                    sb.auth.update_user({"password": new_pw})
-                    
-                    st.success("🎉 ¡Contraseña actualizada con éxito!")
-                    st.balloons()
-                    time.sleep(2)
-                    # Redirigir al inicio (Login)
-                    st.markdown('<meta http-equiv="refresh" content="0; url=/" />', unsafe_allow_html=True)
-                    st.stop()
-                except Exception as e:
-                    st.error(f"Hubo un problema: {str(e)}")
+
+    new_pw     = st.text_input("Nueva contraseña",    type="password", placeholder="Mínimo 6 caracteres")
+    confirm_pw = st.text_input("Confirmar contraseña", type="password", placeholder="Repite tu contraseña")
+
+    if st.button("Actualizar contraseña", use_container_width=True):
+        if len(new_pw) < 6:
+            st.error("⚠️ La contraseña debe tener al menos 6 caracteres.")
+        elif new_pw != confirm_pw:
+            st.error("⚠️ Las contraseñas no coinciden.")
+        else:
+            try:
+                sb = get_supabase()
+                sb.auth.set_session(access_token, refresh_token)
+                sb.auth.update_user({"password": new_pw})
+
+                st.success("🎉 ¡Contraseña actualizada con éxito!")
+                st.balloons()
+                time.sleep(2)
+                st.markdown('<meta http-equiv="refresh" content="0; url=/" />', unsafe_allow_html=True)
+                st.stop()
+            except Exception as e:
+                st.error(f"Hubo un problema al actualizar: {str(e)}")
 else:
-    st.error("❌ El enlace es inválido o ha expirado.")
+    st.error("❌ El enlace es inválido o ha expirado. Por favor solicita uno nuevo.")
     if st.button("Volver al inicio"):
         st.markdown('<meta http-equiv="refresh" content="0; url=/" />', unsafe_allow_html=True)
