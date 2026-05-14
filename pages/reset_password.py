@@ -9,9 +9,9 @@ import jwt
 # CONFIG
 # =========================================================
 
-SUPABASE_URL = "https://wopthjsdceattleaeczt.supabase.co"
+SUPABASE_URL = st.secrets["supabase"]["SUPABASE_URL"]
 
-SUPABASE_ANON_KEY = st.secrets["supabase"]["key"]
+SUPABASE_ANON_KEY = st.secrets["supabase"]["SUPABASE_KEY"]
 
 st.set_page_config(
     page_title="Nueva Contraseña — GestorPro",
@@ -164,13 +164,13 @@ div[data-testid="stError"] {
 """, unsafe_allow_html=True)
 
 # =========================================================
-# EXTRAER HASH DE SUPABASE
+# LEER HASH
 # =========================================================
 
 hash_value = st.query_params.get("_hash", "")
 
 # =========================================================
-# PRIMERA CARGA
+# EXTRAER HASH DE SUPABASE
 # =========================================================
 
 if not hash_value:
@@ -184,13 +184,13 @@ if not hash_value:
 
         const url = new URL(window.parent.location.href);
 
-        // eliminar hash visualmente
+        // eliminar hash
         url.hash = "";
 
-        // guardar hash como query param
+        // guardar hash en query params
         url.searchParams.set("_hash", hash);
 
-        // recargar
+        // redireccionar
         window.parent.location.replace(url.toString());
     }
 
@@ -199,7 +199,10 @@ if not hash_value:
 
     st.markdown("""
     <div class="auth-logo-wrap">
-        <div class="auth-logo-icon">GP</div>
+
+        <div class="auth-logo-icon">
+            GP
+        </div>
 
         <div class="auth-app-title">
             Restablecer contraseña
@@ -208,6 +211,7 @@ if not hash_value:
         <div class="auth-app-sub">
             Verificando enlace...
         </div>
+
     </div>
     """, unsafe_allow_html=True)
 
@@ -228,17 +232,16 @@ for item in hash_value.split("&"):
         hash_params[key] = urllib.parse.unquote(value)
 
 # =========================================================
-# DEBUG (puedes borrar luego)
-# =========================================================
-
-# st.write(hash_params)
-
-# =========================================================
-# VALIDAR TOKEN
+# TOKENS
 # =========================================================
 
 access_token = hash_params.get("access_token")
+
 refresh_token = hash_params.get("refresh_token")
+
+# =========================================================
+# VALIDAR LINK
+# =========================================================
 
 if not access_token:
 
@@ -282,13 +285,14 @@ try:
     user_email = decoded.get("email", "")
 
     if user_email:
+
         st.success(f"Recuperando cuenta: {user_email}")
 
 except Exception:
     pass
 
 # =========================================================
-# FORM
+# INPUTS
 # =========================================================
 
 new_password = st.text_input(
@@ -304,7 +308,7 @@ confirm_password = st.text_input(
 )
 
 # =========================================================
-# UPDATE PASSWORD
+# BOTÓN
 # =========================================================
 
 if st.button("Actualizar contraseña"):
