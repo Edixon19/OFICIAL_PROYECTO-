@@ -58,51 +58,62 @@ def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # ============================================
-# LEER EL HASH DIRECTAMENTE (SIN JAVASCRIPT)
+# TRUCO: Usar un parámetro especial para forzar la lectura del hash
 # ============================================
 
-# Método especial para Streamlit Cloud: leer hash de la URL
-# Usamos un componente HTML que envía el hash a Python
-hash_value = st.query_params.get("_hash", "")
-
-if not hash_value:
-    # Inyectar un iframe invisible que lee el hash y lo envía de vuelta
-    st.markdown("""
-    <iframe srcdoc='
-    <script>
-        const hash = window.parent.location.hash.substring(1);
-        if (hash) {
-            const url = new URL(window.parent.location.href);
-            url.searchParams.set("_hash", hash);
-            window.parent.location.replace(url);
-        }
-    </script>
-    ' style="display:none;"></iframe>
-    """, unsafe_allow_html=True)
-    
-    # Mostrar mensaje de carga
-    st.markdown("""
-    <div class="auth-logo-wrap">
-        <div class="auth-logo-icon">GP</div>
-        <div class="auth-app-title">Restablecer contraseña</div>
-        <div class="auth-app-sub">Verificando enlace...</div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
+# Si no hay token y no estamos en modo de espera, inyectar JS que redirige
+if "access_token" not in st.query_params and "token" not in st.query_params:
+    if not st.session_state.get("hash_processed"):
+        st.session_state["hash_processed"] = True
+        
+        # JavaScript que lee el hash y redirige a la misma página con query params
+        st.markdown("""
+        <script>
+        (function() {
+            var hash = window.location.hash;
+            if (hash && hash.includes('access_token')) {
+                var new_url = window.location.pathname + '?access_token=1&_hash=' + encodeURIComponent(hash.substring(1));
+                window.location.replace(new_url);
+            }
+        })();
+        </script>
+        """, unsafe_allow_html=True)
+        
+        # Mostrar mensaje de carga
+        st.markdown("""
+        <div class="auth-logo-wrap">
+            <div class="auth-logo-icon">GP</div>
+            <div class="auth-app-title">Restablecer contraseña</div>
+            <div class="auth-app-sub">Verificando enlace...</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.stop()
 
 # ============================================
-# PARSEAR EL HASH
+# Procesar el hash que llegó como query param
 # ============================================
-hash_params = {}
-if hash_value:
-    for item in hash_value.split('&'):
+
+if "_hash" in st.query_params:
+    hash_raw = st.query_params["_hash"]
+    # Parsear el hash
+    hash_params = {}
+    for item in hash_raw.split('&'):
         if '=' in item:
             key, value = item.split('=', 1)
             hash_params[key] = urllib.parse.unquote(value)
+    
+    # Guardar en session_state para usarlo
+    if "access_token" in hash_params:
+        st.session_state["reset_access_token"] = hash_params["access_token"]
+        st.session_state["reset_refresh_token"] = hash_params.get("refresh_token", "")
+        st.session_state["reset_type"] = hash_params.get("type", "")
+        # Limpiar query params
+        st.query_params.clear()
 
 # ============================================
-# MOSTRAR LOGO
+# MOSTRAR FORMULARIO
 # ============================================
+
 st.markdown("""
 <div class="auth-logo-wrap">
     <div class="auth-logo-icon">GP</div>
@@ -111,23 +122,22 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ============================================
-# VERIFICAR TOKEN
-# ============================================
-if "access_token" in hash_params and hash_params.get("type") == "recovery":
-    access_token = hash_params["access_token"]
-    refresh_token = hash_params.get("refresh_token", "")
-    
-    # Decodificar token para mostrar email
+# Verificar si tenemos token en session_state
+access_token = st.session_state.get("reset_access_token", "")
+refresh_token = st.session_state.get("reset_refresh_token", "")
+token_type = st.session_state.get("reset_type", "")
+
+if access_token and token_type == "recovery":
+    # Mostrar email si podemos decodificar
     try:
         import jwt
         decoded = jwt.decode(access_token, options={"verify_signature": False})
         user_email = decoded.get("email", "")
-        st.success(f"✅ Verificado para: **{user_email}**")
+        st.success(f"✅ Restableciendo para: **{user_email}**")
     except:
         st.success("✅ Enlace verificado correctamente")
     
-    # Formulario de nueva contraseña
+    # Formulario
     new_pw = st.text_input("Nueva contraseña", type="password", placeholder="Mínimo 6 caracteres", key="new_pw")
     confirm_pw = st.text_input("Confirmar contraseña", type="password", placeholder="Repite la contraseña", key="confirm_pw")
     
@@ -139,25 +149,25 @@ if "access_token" in hash_params and hash_params.get("type") == "recovery":
         else:
             try:
                 sb = get_supabase()
-                # Establecer sesión y actualizar
                 session = sb.auth.set_session(access_token, refresh_token)
                 if session and session.user:
                     sb.auth.update_user({"password": new_pw})
                     sb.auth.sign_out()
                     st.success("✅ ¡Contraseña actualizada exitosamente!")
                     st.balloons()
-                    st.markdown("Redirigiendo al inicio de sesión...")
-                    st.query_params.clear()
-                    import time
-                    time.sleep(2)
-                    st.markdown('<meta http-equiv="refresh" content="0; url=/" />', unsafe_allow_html=True)
+                    # Limpiar session_state
+                    del st.session_state["reset_access_token"]
+                    del st.session_state["reset_refresh_token"]
+                    del st.session_state["reset_type"]
+                    st.markdown('<meta http-equiv="refresh" content="2; url=/" />', unsafe_allow_html=True)
                 else:
-                    st.error("Enlace inválido o expirado")
+                    st.error("❌ Enlace inválido o expirado")
             except Exception as e:
-                if "same" in str(e).lower():
-                    st.error("La nueva contraseña no puede ser igual a la anterior")
+                error_msg = str(e).lower()
+                if "same password" in error_msg:
+                    st.error("❌ La nueva contraseña no puede ser igual a la anterior")
                 else:
-                    st.error(f"Error: {str(e)[:100]}")
+                    st.error(f"❌ Error: {error_msg[:100]}")
 else:
     st.error("❌ Enlace inválido o expirado")
     if st.button("Volver al inicio de sesión", use_container_width=True):
