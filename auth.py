@@ -2,10 +2,11 @@
 GestorPro — Módulo de Autenticación con Supabase Auth
 ======================================================
 Maneja: Email/Password · Google OAuth · Registro · Recuperación de contraseña
-v2.1 — Detección de flujo recovery, textos con color fijo oscuro, menos emojis
+v2.2 — Fix flujo recovery: detección robusta del hash con components.v1.html
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import create_client, Client
 
 # ──────────────────────────────────────────────
@@ -18,7 +19,6 @@ SUPABASE_ANON_KEY = (
     "icm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MzM3NjYsImV4cCI6MjA5MjMwOTc2Nn0"
     ".QNCHhCzedHSGPul5S-JWZUo3jEV6959tWoKEEeNHztA"
 )
-# Cambia esta URL cuando despliegues en producción
 SITE_URL = "https://gestorpro.streamlit.app/"
 
 
@@ -33,10 +33,6 @@ def _sb() -> Client:
 # ══════════════════════════════════════════════
 
 def auth_login(email: str, password: str):
-    """
-    Inicia sesión con email y contraseña.
-    Retorna (user, session, error_str).
-    """
     try:
         res = _sb().auth.sign_in_with_password({"email": email, "password": password})
         return res.user, res.session, None
@@ -50,10 +46,6 @@ def auth_login(email: str, password: str):
 
 
 def auth_register(email: str, password: str, full_name: str):
-    """
-    Registra un nuevo usuario.
-    Retorna (user, error_str).
-    """
     try:
         res = _sb().auth.sign_up({
             "email": email,
@@ -73,17 +65,6 @@ def auth_register(email: str, password: str, full_name: str):
 
 
 def auth_reset_password(email: str):
-    """
-    Envía un correo de recuperación de contraseña.
-    Retorna (ok, error_str).
-
-    IMPORTANTE sobre redirect_to:
-      - La URL base debe estar registrada en Supabase →
-        Authentication → URL Configuration → Redirect URLs.
-      - Si redirect_to causa un error 422, se reintenta sin él
-        (Supabase usará la Site URL configurada en el panel).
-    """
-    # Intento 1: con redirect_to explícito
     try:
         _sb().auth.reset_password_email(
             email,
@@ -92,24 +73,16 @@ def auth_reset_password(email: str):
         return True, None
     except Exception as e:
         err_msg = str(e)
-        # Si el error es por redirect_to no permitida (422 / redirect_uri_mismatch)
-        # reintentamos sin ese parámetro para no bloquear el envío
         if "redirect" in err_msg.lower() or "422" in err_msg or "url" in err_msg.lower():
             try:
                 _sb().auth.reset_password_email(email)
                 return True, None
             except Exception as e2:
                 return False, str(e2)
-        # Cualquier otro error: devolver el mensaje real para poder depurarlo
         return False, err_msg
 
 
 def auth_update_password(new_password: str):
-    """
-    Actualiza la contraseña del usuario autenticado (flujo recovery).
-    Requiere que la sesión ya esté establecida con auth_set_session.
-    Retorna (ok, error_str).
-    """
     try:
         _sb().auth.update_user({"password": new_password})
         return True, None
@@ -121,10 +94,6 @@ def auth_update_password(new_password: str):
 
 
 def auth_get_google_url():
-    """
-    Genera la URL de autorización OAuth de Google.
-    Retorna (url, error_str).
-    """
     try:
         res = _sb().auth.sign_in_with_oauth({
             "provider": "google",
@@ -139,10 +108,6 @@ def auth_get_google_url():
 
 
 def auth_set_session(access_token: str, refresh_token: str) -> bool:
-    """
-    Restaura la sesión a partir de tokens OAuth (después del callback de Google o recovery).
-    Retorna True si tuvo éxito.
-    """
     try:
         res = _sb().auth.set_session(access_token, refresh_token)
         if res and res.user:
@@ -155,10 +120,6 @@ def auth_set_session(access_token: str, refresh_token: str) -> bool:
 
 
 def auth_current_user():
-    """
-    Obtiene el usuario actual de la sesión activa de Supabase.
-    Retorna el objeto user o None.
-    """
     try:
         res = _sb().auth.get_user()
         return res.user if res else None
@@ -167,7 +128,6 @@ def auth_current_user():
 
 
 def auth_logout():
-    """Cierra la sesión y limpia el estado de sesión."""
     try:
         _sb().auth.sign_out()
     except Exception:
@@ -178,10 +138,6 @@ def auth_logout():
 
 
 def auth_user_display(user) -> tuple:
-    """
-    Extrae nombre y email del objeto user de Supabase.
-    Retorna (display_name, email).
-    """
     if not user:
         return "Usuario", ""
     email = getattr(user, "email", "") or ""
@@ -195,7 +151,6 @@ def auth_user_display(user) -> tuple:
 
 
 def auth_user_id() -> str | None:
-    """Retorna el UUID del usuario autenticado, o None."""
     user = st.session_state.get("auth_user")
     if user:
         return str(getattr(user, "id", None))
@@ -212,7 +167,6 @@ _AUTH_CSS = """
 
 html, body { font-family: 'Sora', sans-serif !important; }
 
-/* Fondo degradado */
 .stApp {
     background: linear-gradient(
         145deg,
@@ -223,7 +177,6 @@ html, body { font-family: 'Sora', sans-serif !important; }
     min-height: 100vh !important;
 }
 
-/* Ocultar elementos de Streamlit */
 section[data-testid="stSidebar"],
 header[data-testid="stHeader"],
 [data-testid="collapsedControl"],
@@ -234,19 +187,12 @@ header[data-testid="stHeader"],
     visibility: hidden !important;
 }
 
-/* Contenedor centrado */
 .main .block-container {
     padding: 4vh 1rem 2rem !important;
     max-width: 440px !important;
     margin: 0 auto !important;
 }
 
-/* ─────────────────────────────────────────────────────
-   FIX GLOBAL: todos los textos nativos de Streamlit
-   dentro del área principal con color oscuro fijo.
-   Esto evita que hereden el blanco del tema oscuro
-   cuando el fondo es claro (pantalla de auth).
-──────────────────────────────────────────────────── */
 .main p,
 .main span:not([class*="st-"]),
 .main div:not([data-testid]),
@@ -255,7 +201,6 @@ header[data-testid="stHeader"],
     color: #0f172a;
 }
 
-/* Labels de inputs — selector específico para mayor peso */
 .stTextInput label,
 .stTextInput label p,
 .stTextInput label span,
@@ -267,7 +212,6 @@ header[data-testid="stHeader"],
     font-family: 'Sora', sans-serif !important;
 }
 
-/* Checkbox */
 .stCheckbox label,
 .stCheckbox label span,
 .stCheckbox label p {
@@ -276,7 +220,6 @@ header[data-testid="stHeader"],
     font-family: 'Sora', sans-serif !important;
 }
 
-/* Textos dentro de mensajes de alerta: conservar color propio */
 div[data-testid="stSuccess"] p,
 div[data-testid="stSuccess"] span,
 div[data-testid="stError"] p,
@@ -288,7 +231,6 @@ div[data-testid="stWarning"] span {
     color: inherit !important;
 }
 
-/* Inputs */
 .stTextInput > div > div > input {
     background: #f8fafc !important;
     border: 1.5px solid #e2e8f0 !important;
@@ -308,7 +250,6 @@ div[data-testid="stWarning"] span {
     color: #94a3b8 !important;
 }
 
-/* Botón CTA principal */
 .st-key-auth_login_btn button,
 .st-key-auth_register_btn button,
 .st-key-auth_reset_btn button,
@@ -333,7 +274,6 @@ div[data-testid="stWarning"] span {
     box-shadow: 0 7px 22px rgba(229,90,43,0.45) !important;
 }
 
-/* Botones OAuth */
 .st-key-auth_google_btn button,
 .st-key-auth_github_btn button {
     background: #ffffff !important;
@@ -354,7 +294,6 @@ div[data-testid="stWarning"] span {
     transform: translateY(-1px) !important;
 }
 
-/* Botones de navegación tipo enlace */
 .st-key-auth_to_register button,
 .st-key-auth_to_login button,
 .st-key-auth_to_forgot button,
@@ -379,7 +318,6 @@ div[data-testid="stWarning"] span {
     transform: none !important;
 }
 
-/* Divisor */
 .auth-divider {
     display: flex;
     align-items: center;
@@ -396,7 +334,6 @@ div[data-testid="stWarning"] span {
     background: #e2e8f0;
 }
 
-/* Logo */
 .auth-logo-wrap {
     display: flex;
     flex-direction: column;
@@ -427,7 +364,6 @@ div[data-testid="stWarning"] span {
     margin-top: 0.15rem;
 }
 
-/* Caja de info */
 .auth-info-box {
     background: rgba(13,148,136,0.07);
     border: 1px solid rgba(13,148,136,0.22);
@@ -440,7 +376,6 @@ div[data-testid="stWarning"] span {
     line-height: 1.55;
 }
 
-/* Indicador fortaleza de contraseña */
 .pw-strength-bar {
     height: 4px;
     border-radius: 2px;
@@ -459,7 +394,6 @@ div[data-testid="stWarning"] span {
     font-family: 'Sora', sans-serif;
 }
 
-/* Footer legal */
 .auth-footer {
     text-align: center;
     margin-top: 1.75rem;
@@ -474,7 +408,6 @@ div[data-testid="stWarning"] span {
     font-weight: 600;
 }
 
-/* Alertas de Streamlit */
 div[data-testid="stSuccess"],
 div[data-testid="stError"],
 div[data-testid="stInfo"],
@@ -487,38 +420,6 @@ div[data-testid="stWarning"] {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 2px; }
 </style>
-"""
-
-# ══════════════════════════════════════════════
-#  JAVASCRIPT — convierte hash en query params
-#  (necesario para OAuth y recovery desde email)
-# ══════════════════════════════════════════════
-
-_OAUTH_CALLBACK_JS = """
-<script>
-(function handleAuthCallback() {
-    /*
-     * Supabase devuelve tokens en el hash (#) de la URL tras OAuth o recovery.
-     * Streamlit no puede leerlo desde Python, así que lo pasamos a query params.
-     * El parámetro "type" se preserva para detectar el flujo de recuperación.
-     */
-    var hash = window.location.hash;
-    if (hash && hash.length > 1 && hash.includes('access_token')) {
-        var params = new URLSearchParams(hash.substring(1));
-        var at   = params.get('access_token')  || '';
-        var rt   = params.get('refresh_token') || '';
-        var type = params.get('type')          || '';
-        if (at) {
-            var url = new URL(window.location.href);
-            url.hash = '';
-            url.searchParams.set('access_token',  at);
-            url.searchParams.set('refresh_token', rt);
-            if (type) url.searchParams.set('type', type);
-            window.location.replace(url.toString());
-        }
-    }
-})();
-</script>
 """
 
 
@@ -549,7 +450,6 @@ def _small_text(text: str):
 
 
 def _pw_strength(pw: str) -> str:
-    """Devuelve HTML del indicador de fortaleza de contraseña."""
     if not pw:
         return ""
     score = sum([
@@ -572,6 +472,114 @@ def _pw_strength(pw: str) -> str:
 
 
 # ══════════════════════════════════════════════
+#  INYECTOR JS — convierte hash en query params
+#  Usa components.v1.html que SÍ ejecuta scripts
+#  de forma confiable en Streamlit.
+# ══════════════════════════════════════════════
+
+def _inject_hash_to_params_js():
+    """
+    Inyecta un iframe de altura 0 con JavaScript que:
+      1. Lee el hash del window padre (mismo origen en Streamlit Cloud).
+      2. Si contiene access_token, reemplaza la URL con query params equivalentes.
+      3. El replace dispara un rerun de Streamlit que ya ve los params en Python.
+
+    Por qué components.v1.html en vez de st.markdown:
+      st.markdown(unsafe_allow_html=True) puede silenciar <script> tags en versiones
+      recientes de Streamlit. components.v1.html ejecuta el script dentro de un
+      iframe srcdoc que comparte el origen de la app (Streamlit Cloud), por lo que
+      window.parent.location es accesible.
+    """
+    components.html(
+        """
+        <script>
+        (function() {
+            try {
+                // Intentar leer el hash de la ventana padre (mismo origen)
+                var parentLoc = window.parent.location;
+                var hash = parentLoc.hash;
+
+                if (!hash || !hash.includes('access_token')) return;
+
+                var params = new URLSearchParams(hash.substring(1));
+                var at   = params.get('access_token')  || '';
+                var rt   = params.get('refresh_token') || '';
+                var type = params.get('type')          || '';
+
+                if (!at) return;
+
+                var url = new URL(parentLoc.href);
+                url.hash = '';                              // quitar hash
+                url.searchParams.set('access_token',  at);
+                url.searchParams.set('refresh_token', rt);
+                if (type) url.searchParams.set('type', type);
+
+                // replace para no dejar el hash en el historial
+                parentLoc.replace(url.toString());
+
+            } catch (crossOriginErr) {
+                // Fallback: si estamos en el mismo contexto de ventana (sin iframe)
+                try {
+                    var hash = window.location.hash;
+                    if (!hash || !hash.includes('access_token')) return;
+                    var params = new URLSearchParams(hash.substring(1));
+                    var at   = params.get('access_token')  || '';
+                    var rt   = params.get('refresh_token') || '';
+                    var type = params.get('type')          || '';
+                    if (!at) return;
+                    var url = new URL(window.location.href);
+                    url.hash = '';
+                    url.searchParams.set('access_token',  at);
+                    url.searchParams.set('refresh_token', rt);
+                    if (type) url.searchParams.set('type', type);
+                    window.location.replace(url.toString());
+                } catch(e) {}
+            }
+        })();
+        </script>
+        """,
+        height=0,
+        scrolling=False,
+    )
+
+
+# ══════════════════════════════════════════════
+#  PANTALLA INTERMEDIA — recovery sin token aún
+# ══════════════════════════════════════════════
+
+def _render_extracting_recovery():
+    """
+    Se muestra cuando la URL tiene ?type=recovery pero el access_token todavía
+    está en el hash (el JS del iframe aún no terminó su primer ciclo).
+
+    Inyecta el JS extractor y muestra un spinner mientras Streamlit espera el
+    rerun que vendrá tras el window.location.replace del script.
+    """
+    st.markdown(_AUTH_CSS, unsafe_allow_html=True)
+    _inject_hash_to_params_js()
+
+    st.markdown(
+        _logo("GestorPro", "Verificando enlace de recuperación..."),
+        unsafe_allow_html=True,
+    )
+    st.markdown("""
+    <div class="auth-info-box">
+        Procesando tu enlace de recuperación. Si esta pantalla no avanza en
+        unos segundos, haz clic en el botón de abajo.
+    </div>
+    """, unsafe_allow_html=True)
+
+    _spacer(0.5)
+    with st.spinner("Cargando..."):
+        import time
+        time.sleep(1)
+
+    _spacer(0.5)
+    if st.button("Recargar página", key="auth_back_login"):
+        st.rerun()
+
+
+# ══════════════════════════════════════════════
 #  PANTALLA: NUEVA CONTRASEÑA (flujo recovery)
 # ══════════════════════════════════════════════
 
@@ -579,13 +587,7 @@ def _render_reset_password(access_token: str, refresh_token: str):
     """
     Formulario para establecer una nueva contraseña después de hacer clic
     en el enlace del correo de recuperación.
-
-    Pasos:
-      1. Se establece la sesión con los tokens del enlace.
-      2. El usuario ingresa y confirma su nueva contraseña.
-      3. Se llama a auth.update_user({"password": ...}) para guardar el cambio.
     """
-    # Establecer sesión con los tokens del enlace (solo una vez)
     if not st.session_state.get("_recovery_session_set"):
         ok = auth_set_session(access_token, refresh_token)
         if ok:
@@ -614,7 +616,7 @@ def _render_reset_password(access_token: str, refresh_token: str):
     </div>
     """, unsafe_allow_html=True)
 
-    new_pw  = st.text_input(
+    new_pw = st.text_input(
         "Nueva contraseña",
         type="password",
         placeholder="Mínimo 6 caracteres",
@@ -644,7 +646,6 @@ def _render_reset_password(access_token: str, refresh_token: str):
         else:
             ok, err = auth_update_password(new_pw)
             if ok:
-                # Limpiar tokens de la URL y estado temporal
                 st.query_params.clear()
                 st.session_state.pop("_recovery_session_set", None)
                 st.success(
@@ -652,7 +653,6 @@ def _render_reset_password(access_token: str, refresh_token: str):
                     "Ya puedes iniciar sesión con tu nueva contraseña."
                 )
                 _spacer(0.5)
-                # Cerrar la sesión de recovery para forzar login limpio
                 try:
                     _sb().auth.sign_out()
                 except Exception:
@@ -661,7 +661,7 @@ def _render_reset_password(access_token: str, refresh_token: str):
                     del st.session_state[k]
                 st.session_state.auth_page = "login"
                 _spacer(0.25)
-                if st.button("Ir al inicio de sesión", key="auth_back_login"):
+                if st.button("Ir al inicio de sesión", key="auth_go_login"):
                     st.rerun()
             else:
                 st.error(err)
@@ -688,9 +688,9 @@ def _render_login():
         )
         st.stop()
 
-    # Manejar callback OAuth: tokens en query params
+    # Callback OAuth de Google: tokens en query params, tipo distinto de recovery
     params = st.query_params
-    if "access_token" in params and params.get("type", "") != "recovery":
+    if "access_token" in params and params.get("type", "") not in ("recovery", ""):
         at = params.get("access_token", "")
         rt = params.get("refresh_token", "")
         st.query_params.clear()
@@ -698,6 +698,18 @@ def _render_login():
             st.rerun()
         else:
             st.error("Error al procesar la sesión de Google. Inténtalo de nuevo.")
+        return
+
+    # También manejar Google OAuth sin type param
+    if "access_token" in params and "type" not in params:
+        at = params.get("access_token", "")
+        rt = params.get("refresh_token", "")
+        st.query_params.clear()
+        if at and auth_set_session(at, rt):
+            st.rerun()
+        else:
+            st.error("Error al procesar la sesión de Google. Inténtalo de nuevo.")
+        return
 
     st.markdown(_logo("GestorPro", "Bienvenido de vuelta"), unsafe_allow_html=True)
 
@@ -781,15 +793,10 @@ def _render_register():
 
     st.markdown(_logo("Crear cuenta", "Únete a GestorPro hoy"), unsafe_allow_html=True)
 
-    full_name = st.text_input(
-        "Nombre completo", placeholder="Ana García", key="reg_name"
-    )
-    email = st.text_input(
-        "Correo electrónico", placeholder="tu@email.com", key="reg_email"
-    )
-    password = st.text_input(
-        "Contraseña", placeholder="Mínimo 6 caracteres",
-        key="reg_pass", type="password"
+    full_name = st.text_input("Nombre completo", placeholder="Ana García", key="reg_name")
+    email     = st.text_input("Correo electrónico", placeholder="tu@email.com", key="reg_email")
+    password  = st.text_input(
+        "Contraseña", placeholder="Mínimo 6 caracteres", key="reg_pass", type="password"
     )
     if password:
         st.markdown(_pw_strength(password), unsafe_allow_html=True)
@@ -845,7 +852,7 @@ def _render_register():
 
 
 # ══════════════════════════════════════════════
-#  PÁGINA: RECUPERAR CONTRASEÑA (envío de correo)
+#  PÁGINA: RECUPERAR CONTRASEÑA
 # ══════════════════════════════════════════════
 
 def _render_forgot():
@@ -882,8 +889,7 @@ def _render_forgot():
                     st.warning(
                         "Límite de correos alcanzado. "
                         "Supabase permite máximo 2 correos por hora en el plan gratuito. "
-                        "Espera unos minutos e inténtalo de nuevo, o revisa si el enlace "
-                        "anterior todavía está en tu bandeja de entrada."
+                        "Espera unos minutos e inténtalo de nuevo."
                     )
                 else:
                     st.error(f"No se pudo enviar el correo: {err}")
@@ -901,33 +907,83 @@ def _render_forgot():
 def render_auth():
     """
     Renderiza la página de autenticación activa.
-    Llama a esta función desde app.py cuando el usuario no está autenticado.
 
-    Flujo de recuperación de contraseña:
-      1. El usuario hace clic en "Olvidé mi contraseña" e ingresa su correo.
-      2. Supabase envía un correo con un enlace que incluye type=recovery en el hash.
-      3. El JS de _OAUTH_CALLBACK_JS convierte el hash en query params y recarga.
-      4. render_auth() detecta type=recovery + access_token y muestra
-         _render_reset_password() con el formulario de nueva contraseña.
-      5. auth_update_password() llama a supabase.auth.update_user({"password": ...}).
+    Flujo de recuperación de contraseña (corregido v2.2):
+    ─────────────────────────────────────────────────────
+    1. Usuario hace clic en "Olvidé mi contraseña" → ingresa correo.
+    2. Supabase envía correo. El redirect_to es SITE_URL + ?type=recovery.
+    3. Al hacer clic en el enlace del correo, el navegador llega a:
+         https://gestorpro.streamlit.app/?type=recovery
+         #access_token=TOKEN&refresh_token=RT&type=recovery
+    4. Python ve query params → type=recovery, pero access_token NO (está en hash).
+    5. render_auth detecta: type=recovery + sin access_token → _render_extracting_recovery().
+    6. _render_extracting_recovery() inyecta JS via components.v1.html (confiable).
+    7. El JS lee window.parent.location.hash, extrae tokens, y hace replace() a:
+         ?type=recovery&access_token=TOKEN&refresh_token=RT  (sin hash)
+    8. Streamlit recibe el rerun. Ahora Python sí ve access_token en query params.
+    9. render_auth detecta: type=recovery + access_token → _render_reset_password().
+    10. El usuario elige nueva contraseña y se llama auth_update_password().
     """
-    st.markdown(_AUTH_CSS,          unsafe_allow_html=True)
-    st.markdown(_OAUTH_CALLBACK_JS, unsafe_allow_html=True)
+    st.markdown(_AUTH_CSS, unsafe_allow_html=True)
 
-    if "auth_page" not in st.session_state:
-        st.session_state.auth_page = "login"
-
-    # ── Detectar flujo de recuperación de contraseña ──
     params   = st.query_params
     url_type = params.get("type", "")
     at       = params.get("access_token", "")
     rt       = params.get("refresh_token", "")
 
+    # ── CASO 1: Flujo recovery completo (tokens ya en query params) ──
     if url_type == "recovery" and at:
         _render_reset_password(at, rt)
         return
 
-    # ── Rutas normales ──
+    # ── CASO 2: type=recovery detectado pero token aún en hash ──
+    # Mostramos pantalla intermedia que inyecta JS extractor (confiable).
+    if url_type == "recovery" and not at:
+        _render_extracting_recovery()
+        return
+
+    # ── CASO 3: OAuth callback de Google sin type=recovery ──
+    # (at en query params, venimos del redirect de Google)
+    if at and url_type != "recovery":
+        st.query_params.clear()
+        if auth_set_session(at, rt):
+            st.rerun()
+        else:
+            st.error("Error al procesar la sesión. Inténtalo de nuevo.")
+        return
+
+    # ── Flujo normal: login / register / forgot ──
+    # Inyectar JS de callback OAuth para Google (funciona con st.markdown aquí
+    # porque el hash de Google llega sin ?type=recovery, la detección arriba
+    # no lo captura, y el JS lo procesa en el siguiente render).
+    st.markdown(
+        """
+        <script>
+        (function handleAuthCallback() {
+            var hash = window.location.hash;
+            if (hash && hash.length > 1 && hash.includes('access_token')) {
+                var params = new URLSearchParams(hash.substring(1));
+                var at   = params.get('access_token')  || '';
+                var rt   = params.get('refresh_token') || '';
+                var type = params.get('type')          || '';
+                if (at) {
+                    var url = new URL(window.location.href);
+                    url.hash = '';
+                    url.searchParams.set('access_token',  at);
+                    url.searchParams.set('refresh_token', rt);
+                    if (type) url.searchParams.set('type', type);
+                    window.location.replace(url.toString());
+                }
+            }
+        })();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if "auth_page" not in st.session_state:
+        st.session_state.auth_page = "login"
+
     dispatch = {
         "login":    _render_login,
         "register": _render_register,
