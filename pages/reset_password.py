@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 from supabase import create_client
 import urllib.parse
 import time
@@ -16,9 +15,6 @@ except:
 
 st.set_page_config(page_title="Nueva Contraseña — GestorPro", page_icon="🔐", layout="centered")
 
-# ============================================
-# CSS PERSONALIZADO
-# ============================================
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap');
@@ -81,33 +77,40 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================
-# CAPTURA DEL HASH — SOLUCIÓN ROBUSTA
+# ESTRATEGIA: leer access_token directo desde query params
+# Supabase puede enviar los tokens como query params si se configura
+# "flowType: pkce" — pero también los manda como hash.
+# La única forma de capturar el hash en Streamlit es con st.markdown JS
+# que haga un top-level redirect.
 # ============================================
-# Supabase pone el token en el fragment (#access_token=...) que NUNCA
-# llega al servidor. Usamos st.components para leer el hash desde el
-# navegador y redirigir añadiéndolo como query param ?_hash=...
-# ============================================
 
-hash_value = st.query_params.get("_hash", "")
+# Intentar leer desde query params normales primero
+# (cuando ya hicimos la redirección desde el JS)
+access_token  = st.query_params.get("access_token", "")
+refresh_token = st.query_params.get("refresh_token", "")
+token_type    = st.query_params.get("type", "")
 
-if not hash_value:
-    # Inyectamos JS directamente en la página (sin iframe) para capturar el hash
-    components.html(
-        """
-        <script>
-            const hash = window.location.hash.substring(1);
-            if (hash && hash.includes('access_token')) {
-                // Construir la URL nueva con el hash como query param
-                const currentUrl = window.location.href.split('#')[0].split('?')[0];
-                const newUrl = currentUrl + '?_hash=' + encodeURIComponent(hash);
-                window.location.replace(newUrl);
-            }
-        </script>
-        """,
-        height=0,
-    )
-
+if not access_token:
+    # El JS de st.markdown SÍ corre en el contexto top-level de la página
+    # (a diferencia de components.html que usa un iframe sandboxed).
+    # Este script lee el hash y redirige con los params en la query string.
     st.markdown("""
+    <script>
+        (function() {
+            const hash = window.location.hash.substring(1);
+            if (!hash) return;
+            const params = new URLSearchParams(hash);
+            const token = params.get('access_token');
+            if (!token) return;
+            // Construir nueva URL con los tokens como query params normales
+            const base = window.location.origin + window.location.pathname;
+            const newUrl = base
+                + '?access_token=' + encodeURIComponent(token)
+                + '&refresh_token=' + encodeURIComponent(params.get('refresh_token') || '')
+                + '&type=' + encodeURIComponent(params.get('type') || '');
+            window.location.replace(newUrl);
+        })();
+    </script>
     <div style="text-align:center; margin-top: 2rem; color:#475569; font-size:0.9rem;">
         ⏳ Validando el enlace de recuperación...
     </div>
@@ -115,23 +118,10 @@ if not hash_value:
     st.stop()
 
 # ============================================
-# PARSEAR LOS PARÁMETROS DEL HASH
-# ============================================
-hash_params = {}
-decoded_hash = urllib.parse.unquote(hash_value)
-for item in decoded_hash.split('&'):
-    if '=' in item:
-        key, value = item.split('=', 1)
-        hash_params[key] = urllib.parse.unquote(value)
-
-# ============================================
 # FORMULARIO DE NUEVA CONTRASEÑA
 # ============================================
-if "access_token" in hash_params and hash_params.get("type") in ("recovery", "signup"):
-    access_token  = hash_params["access_token"]
-    refresh_token = hash_params.get("refresh_token", "")
-
-    new_pw     = st.text_input("Nueva contraseña",    type="password", placeholder="Mínimo 6 caracteres")
+if access_token and token_type in ("recovery", "signup"):
+    new_pw     = st.text_input("Nueva contraseña",     type="password", placeholder="Mínimo 6 caracteres")
     confirm_pw = st.text_input("Confirmar contraseña", type="password", placeholder="Repite tu contraseña")
 
     if st.button("Actualizar contraseña", use_container_width=True):
@@ -151,7 +141,7 @@ if "access_token" in hash_params and hash_params.get("type") in ("recovery", "si
                 st.markdown('<meta http-equiv="refresh" content="0; url=/" />', unsafe_allow_html=True)
                 st.stop()
             except Exception as e:
-                st.error(f"Hubo un problema al actualizar: {str(e)}")
+                st.error(f"Huда un problema al actualizar: {str(e)}")
 else:
     st.error("❌ El enlace es inválido o ha expirado. Por favor solicita uno nuevo.")
     if st.button("Volver al inicio"):
