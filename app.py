@@ -1,7 +1,7 @@
 """
 GestorPro - Gestor de Tareas con Streamlit + Supabase (PostgreSQL)
 ==================================================================
-Versión 1.2
+Versión 2.0 — Con autenticación Supabase Auth
 Autores: GestorPro, equipo del segundo semestre UTEDÉ
 """
 
@@ -10,6 +10,13 @@ from datetime import datetime, date
 
 import streamlit as st
 
+from auth import (
+    render_auth,
+    auth_current_user,
+    auth_logout,
+    auth_user_display,
+    auth_user_id,
+)
 from database import (
     init_db,
     seed_sample_data,
@@ -119,31 +126,42 @@ THEMES = {
 
 def init_session_state() -> None:
     defaults = {
-        "dark_mode": False,
-        "active_page": "Dashboard",
-        "filter_status": "Todas",
-        "filter_category": "Todas",
-        "show_new_task_form": False,
-        "show_new_team_form": False,
-        "editing_task_id": None,
-        "confirm_delete_id": None,
+        # ── UI / navegación ──────────────────
+        "dark_mode":              False,
+        "active_page":            "Dashboard",
+        "filter_status":          "Todas",
+        "filter_category":        "Todas",
+        "show_new_task_form":     False,
+        "show_new_team_form":     False,
+        "editing_task_id":        None,
+        "confirm_delete_id":      None,
         "confirm_delete_team_id": None,
-        "search_query": "",
-        "db_ok": False,
-        "managing_team_id": None,
+        "search_query":           "",
+        "managing_team_id":       None,
+        # ── Base de datos ────────────────────
+        "db_ok":                  False,
+        # ── Autenticación ────────────────────
+        "auth_user":              None,
+        "auth_session":           None,
+        "auth_page":              "login",
     }
     for key, val in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = val
 
-    if not st.session_state.db_ok:
+    # Inicializar BD solo si el usuario está autenticado
+    if st.session_state.get("auth_user") and not st.session_state.db_ok:
         ok = init_db()
         st.session_state.db_ok = ok
         if ok:
             seed_sample_data()
 
-    st.session_state.tasks = db_load_tasks()
-    st.session_state.teams = db_load_teams()
+    if st.session_state.get("auth_user"):
+        st.session_state.tasks = db_load_tasks()
+        st.session_state.teams = db_load_teams()
+    else:
+        st.session_state.setdefault("tasks", [])
+        st.session_state.setdefault("teams", [])
 
 
 # ══════════════════════════════════════════════
@@ -151,25 +169,8 @@ def init_session_state() -> None:
 # ══════════════════════════════════════════════
 
 def inject_css() -> None:
-    """
-    CSS + JS con tres capas de protección para el sidebar fijo:
-
-    CAPA 1 — CSS exhaustivo: cubre todos los data-testid conocidos del botón
-             de colapsar con display:none, pointer-events:none y opacity:0.
-    CAPA 2 — CSS en aria-expanded=false: si Streamlit colapsa el sidebar,
-             se fuerza transform:none y left:0 para mantenerlo visible.
-    CAPA 3 — JavaScript MutationObserver: elimina el botón cada vez que
-             Streamlit lo vuelva a insertar tras un rerun, y revierte
-             cualquier estado colapsado en tiempo real.
-    """
     theme    = THEMES["dark"] if st.session_state.dark_mode else THEMES["light"]
     css_vars = "\n".join(f"    {k}: {v};" for k, v in theme.items())
-
-    tp  = theme["--text-primary"]
-    ts  = theme["--text-secondary"]
-    bc  = theme["--bg-card"]
-    brd = theme["--border-color"]
-    bg  = theme["--bg-main"]
 
     css = f"""
     <style>
@@ -179,7 +180,6 @@ def inject_css() -> None:
 {css_vars}
     }}
 
-    /* ── Base ── */
     html, body, .stApp {{
         background-color: var(--bg-main) !important;
         font-family: 'Sora', sans-serif !important;
@@ -188,13 +188,7 @@ def inject_css() -> None:
     #MainMenu, footer, header {{ visibility: hidden; }}
     .stDeployButton {{ display: none; }}
 
-    /* ══════════════════════════════════════════
-       SIDEBAR FIJO — CAPA 1: CSS exhaustivo
-       Cubre todos los selectores conocidos del
-       botón de colapsar en distintas versiones
-       de Streamlit. Se usa pointer-events:none
-       como respaldo por si display:none falla.
-    ══════════════════════════════════════════ */
+    /* ── Sidebar fijo ── */
     [data-testid="collapsedControl"],
     button[data-testid="collapsedControl"],
     [data-testid="stSidebarCollapseButton"],
@@ -212,8 +206,6 @@ def inject_css() -> None:
         overflow: hidden !important;
         position: absolute !important;
     }}
-
-    /* CAPA 2 — CSS aria-expanded */
     section[data-testid="stSidebar"][aria-expanded="false"] {{
         transform: none !important;
         left: 0 !important;
@@ -221,8 +213,6 @@ def inject_css() -> None:
         visibility: visible !important;
         display: block !important;
     }}
-
-    /* ── Sidebar general ── */
     section[data-testid="stSidebar"] {{
         background: var(--bg-sidebar) !important;
         min-width: 240px !important;
@@ -253,6 +243,20 @@ def inject_css() -> None:
         font-size: 0.88rem !important;
     }}
 
+    /* ── Botón cerrar sesión en sidebar ── */
+    .st-key-nav_logout button {{
+        color: #ef4444 !important;
+        border: 1px solid rgba(239,68,68,0.25) !important;
+        background: rgba(239,68,68,0.06) !important;
+        margin-top: 0.2rem !important;
+    }}
+    .st-key-nav_logout button:hover {{
+        background: rgba(239,68,68,0.14) !important;
+        border-color: rgba(239,68,68,0.5) !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }}
+
     /* ── Main content ── */
     .main .block-container {{
         padding: 1.5rem 2rem !important;
@@ -276,8 +280,6 @@ def inject_css() -> None:
         font-size: 0.84rem !important;
         font-weight: 500 !important;
     }}
-
-    /* ── Date input ── */
     .stDateInput > div > div > input {{
         background: var(--input-bg) !important;
         border-color: var(--input-border) !important;
@@ -376,14 +378,10 @@ def inject_css() -> None:
     }}
 
     /* ══════════════════════════════════════════
-       JERARQUÍA DE BOTONES — 4 niveles cognitivos
-       Nivel 1 Primary   → gradiente naranja-teal  (acción principal / CTA)
-       Nivel 2 Secondary → borde teal, fondo transp (acción reversible)
-       Nivel 3 Ghost     → borde sutil, texto muted  (cancelar / bajo peso)
-       Nivel 4 Danger    → rojo                      (destructivo)
+       JERARQUÍA DE BOTONES
     ══════════════════════════════════════════ */
 
-    /* ── Nivel 2 SECONDARY: base predeterminada para todos los botones ── */
+    /* Nivel 2 SECONDARY — base */
     .stButton > button {{
         background: transparent !important;
         color: #0d9488 !important;
@@ -402,40 +400,28 @@ def inject_css() -> None:
         box-shadow: 0 3px 10px rgba(13,148,136,0.2) !important;
     }}
 
-    /* ── Nivel 1 PRIMARY: CTAs principales ── */
-    /* Streamlit expone el key como clase .st-key en el wrapper del widget */
-    .st-key-btn_create_task button,
-    .st-key-dash_new_task button,
-    .st-key-dash_new_team button,
-    .st-key-open_new_task button,
-    .st-key-open_new_team button,
-    .st-key-btn_create_team button,
-    .st-key-new_reminder_btn button,
-    .st-key-save_profile button,
-    .st-key-save_notifs button,
-    .st-key-refresh_activity button,
+    /* Nivel 1 PRIMARY — CTAs */
+    .st-key-btn_create_task button, .st-key-dash_new_task button,
+    .st-key-dash_new_team button,   .st-key-open_new_task button,
+    .st-key-open_new_team button,   .st-key-btn_create_team button,
+    .st-key-new_reminder_btn button,.st-key-save_profile button,
+    .st-key-save_notifs button,     .st-key-refresh_activity button,
     .st-key-reconnect_db button {{
         background: #262525 !important;
         color: white !important;
         border: none !important;
-         
     }}
-    .st-key-btn_create_task button:hover,
-    .st-key-dash_new_task button:hover,
-    .st-key-dash_new_team button:hover,
-    .st-key-open_new_task button:hover,
-    .st-key-open_new_team button:hover,
-    .st-key-btn_create_team button:hover,
-    .st-key-new_reminder_btn button:hover,
-    .st-key-save_profile button:hover,
-    .st-key-save_notifs button:hover,
-    .st-key-refresh_activity button:hover,
+    .st-key-btn_create_task button:hover, .st-key-dash_new_task button:hover,
+    .st-key-dash_new_team button:hover,   .st-key-open_new_task button:hover,
+    .st-key-open_new_team button:hover,   .st-key-btn_create_team button:hover,
+    .st-key-new_reminder_btn button:hover,.st-key-save_profile button:hover,
+    .st-key-save_notifs button:hover,     .st-key-refresh_activity button:hover,
     .st-key-reconnect_db button:hover {{
         background: #262525 !important;
         transform: translateY(-1px) !important;
     }}
 
-    /* save_{{taskid}} (guardar edicion tarea) — Primary */
+    /* save_{{taskid}} — Primary naranja */
     [class*="st-key-save_"] button {{
         background: #e55a2b !important;
         color: white !important;
@@ -448,9 +434,8 @@ def inject_css() -> None:
         transform: translateY(-1px) !important;
     }}
 
-    /* ── Nivel 3 GHOST: cancelar / bajo peso visual ── */
-    .st-key-btn_cancel_new button,
-    .st-key-btn_cancel_team button,
+    /* Nivel 3 GHOST */
+    .st-key-btn_cancel_new button,     .st-key-btn_cancel_team button,
     [class*="st-key-cancel_edit_"] button,
     [class*="st-key-confirm_no_"] button,
     [class*="st-key-conf_no_team_"] button {{
@@ -459,8 +444,7 @@ def inject_css() -> None:
         border: 1.5px solid var(--border-color) !important;
         box-shadow: none !important;
     }}
-    .st-key-btn_cancel_new button:hover,
-    .st-key-btn_cancel_team button:hover,
+    .st-key-btn_cancel_new button:hover,     .st-key-btn_cancel_team button:hover,
     [class*="st-key-cancel_edit_"] button:hover,
     [class*="st-key-confirm_no_"] button:hover,
     [class*="st-key-conf_no_team_"] button:hover {{
@@ -469,21 +453,17 @@ def inject_css() -> None:
         box-shadow: none !important;
     }}
 
-    /* ── Nivel 4 DANGER: acciones destructivas ── */
-    [class*="st-key-delete_btn_"] button,
-    [class*="st-key-del_team_"] button,
-    [class*="st-key-confirm_yes_"] button,
-    [class*="st-key-conf_del_team_"] button,
+    /* Nivel 4 DANGER */
+    [class*="st-key-delete_btn_"] button, [class*="st-key-del_team_"] button,
+    [class*="st-key-confirm_yes_"] button,[class*="st-key-conf_del_team_"] button,
     [class*="st-key-remove_member_"] button {{
         background: rgba(239,68,68,0.08) !important;
         color: #ef4444 !important;
         border: 1.5px solid rgba(239,68,68,0.4) !important;
         box-shadow: none !important;
     }}
-    [class*="st-key-delete_btn_"] button:hover,
-    [class*="st-key-del_team_"] button:hover,
-    [class*="st-key-confirm_yes_"] button:hover,
-    [class*="st-key-conf_del_team_"] button:hover,
+    [class*="st-key-delete_btn_"] button:hover, [class*="st-key-del_team_"] button:hover,
+    [class*="st-key-confirm_yes_"] button:hover,[class*="st-key-conf_del_team_"] button:hover,
     [class*="st-key-remove_member_"] button:hover {{
         background: rgba(239,68,68,0.16) !important;
         border-color: #ef4444 !important;
@@ -491,7 +471,7 @@ def inject_css() -> None:
         transform: translateY(-1px) !important;
     }}
 
-    /* ── reset_data — Advertencia (accion reversible pero llamativa) ── */
+    /* reset_data — Advertencia */
     .st-key-reset_data button {{
         background: rgba(245,158,11,0.1) !important;
         color: #d97706 !important;
@@ -505,7 +485,7 @@ def inject_css() -> None:
         transform: translateY(-1px) !important;
     }}
 
-    /* ── Download button (Secondary igual) ── */
+    /* Download button */
     .stDownloadButton > button {{
         background: transparent !important;
         color: #0d9488 !important;
@@ -520,15 +500,13 @@ def inject_css() -> None:
         box-shadow: 0 3px 10px rgba(13,148,136,0.2) !important;
     }}
 
-    /* ── Cards de stats ── */
+    /* ── Stat cards ── */
     .stat-card {{
         background: var(--bg-card);
-        border-radius: 14px;
-        padding: 1.25rem 1.5rem;
+        border-radius: 14px; padding: 1.25rem 1.5rem;
         border: 1px solid var(--border-color);
         box-shadow: var(--shadow);
-        transition: box-shadow 0.2s, transform 0.2s;
-        margin-bottom: 1rem;
+        transition: box-shadow 0.2s, transform 0.2s; margin-bottom: 1rem;
     }}
     .stat-card:hover {{ box-shadow: var(--shadow-hover); transform: translateY(-2px); }}
     .stat-card .stat-value {{
@@ -550,13 +528,9 @@ def inject_css() -> None:
 
     /* ── Task cards ── */
     .task-card {{
-        background: var(--bg-card);
-        border-radius: 14px;
-        padding: 1.1rem 1.4rem;
-        border: 1px solid var(--border-color);
-        box-shadow: var(--shadow);
-        margin-bottom: 0.7rem;
-        transition: all 0.2s;
+        background: var(--bg-card); border-radius: 14px;
+        padding: 1.1rem 1.4rem; border: 1px solid var(--border-color);
+        box-shadow: var(--shadow); margin-bottom: 0.7rem; transition: all 0.2s;
     }}
     .task-card:hover {{ box-shadow: var(--shadow-hover); border-color: rgba(229,90,43,0.3); }}
     .task-card.completed {{ opacity: 0.65; }}
@@ -734,9 +708,6 @@ def inject_css() -> None:
     </style>
     """
 
-    # ══════════════════════════════════════════
-    # CAPA 3 — JavaScript MutationObserver
-    # ══════════════════════════════════════════
     js = """
     <script>
     (function fixSidebar() {
@@ -747,7 +718,6 @@ def inject_css() -> None:
             'button[data-testid="collapsedControl"]',
             'button[data-testid="stSidebarCollapseButton"]'
         ];
-
         function removeCollapseBtn() {
             COLLAPSE_SELECTORS.forEach(function(sel) {
                 document.querySelectorAll(sel).forEach(function(el) {
@@ -755,18 +725,12 @@ def inject_css() -> None:
                     el.style.visibility = 'hidden';
                     el.style.pointerEvents = 'none';
                     el.style.opacity = '0';
-                    el.style.width = '0';
-                    el.style.height = '0';
-                    el.style.overflow = 'hidden';
-                    el.style.position = 'absolute';
                 });
             });
-
             var sidebar = document.querySelector('section[data-testid="stSidebar"]');
             if (sidebar) {
-                if (sidebar.getAttribute('aria-expanded') === 'false') {
+                if (sidebar.getAttribute('aria-expanded') === 'false')
                     sidebar.setAttribute('aria-expanded', 'true');
-                }
                 sidebar.style.transform = 'none';
                 sidebar.style.left = '0';
                 sidebar.style.minWidth = '240px';
@@ -774,26 +738,16 @@ def inject_css() -> None:
                 sidebar.style.display = 'block';
             }
         }
-
         removeCollapseBtn();
-
-        var observer = new MutationObserver(function(mutations) {
-            removeCollapseBtn();
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-
-        var count = 0;
-        var interval = setInterval(function() {
-            removeCollapseBtn();
-            count++;
-            if (count >= 10) clearInterval(interval);
-        }, 500);
+        new MutationObserver(removeCollapseBtn).observe(document.body, { childList: true, subtree: true });
+        var c = 0;
+        var iv = setInterval(function() { removeCollapseBtn(); if (++c >= 10) clearInterval(iv); }, 500);
     })();
     </script>
     """
 
     st.markdown(css, unsafe_allow_html=True)
-    st.markdown(js, unsafe_allow_html=True)
+    st.markdown(js,  unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════
@@ -862,21 +816,21 @@ def render_edit_form(task: dict) -> None:
                 unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
-        nt   = st.text_input("Título *", value=task["title"], key=f"edit_title_{task['id']}")
-        nd   = st.text_area("Descripción", value=task.get("description",""),
-                             key=f"edit_desc_{task['id']}", height=80)
-        na   = st.text_input("Asignado a", value=task.get("assignee",""),
-                              key=f"edit_assignee_{task['id']}")
+        nt  = st.text_input("Título *", value=task["title"], key=f"edit_title_{task['id']}")
+        nd  = st.text_area("Descripción", value=task.get("description",""),
+                            key=f"edit_desc_{task['id']}", height=80)
+        na  = st.text_input("Asignado a", value=task.get("assignee",""),
+                             key=f"edit_assignee_{task['id']}")
     with c2:
-        np_  = st.selectbox("Prioridad", PRIORITIES,
-                             index=PRIORITIES.index(task["priority"]) if task["priority"] in PRIORITIES else 0,
-                             key=f"edit_priority_{task['id']}")
-        nc   = st.selectbox("Categoría", CATEGORIES,
-                             index=CATEGORIES.index(task["category"]) if task["category"] in CATEGORIES else 0,
-                             key=f"edit_category_{task['id']}")
-        ns   = st.selectbox("Estado", STATUS_OPTIONS,
-                             index=STATUS_OPTIONS.index(task["status"]) if task["status"] in STATUS_OPTIONS else 0,
-                             key=f"edit_status_{task['id']}")
+        np_ = st.selectbox("Prioridad", PRIORITIES,
+                            index=PRIORITIES.index(task["priority"]) if task["priority"] in PRIORITIES else 0,
+                            key=f"edit_priority_{task['id']}")
+        nc  = st.selectbox("Categoría", CATEGORIES,
+                            index=CATEGORIES.index(task["category"]) if task["category"] in CATEGORIES else 0,
+                            key=f"edit_category_{task['id']}")
+        ns  = st.selectbox("Estado", STATUS_OPTIONS,
+                            index=STATUS_OPTIONS.index(task["status"]) if task["status"] in STATUS_OPTIONS else 0,
+                            key=f"edit_status_{task['id']}")
         try:
             cur_date = date.fromisoformat(task.get("due_date","")) if task.get("due_date") else date.today()
         except (ValueError, TypeError):
@@ -944,7 +898,13 @@ def render_new_task_form() -> None:
 # ══════════════════════════════════════════════
 
 def render_sidebar() -> None:
+    user       = st.session_state.get("auth_user")
+    name, email = auth_user_display(user)
+    # Avatar: iniciales del nombre
+    initials   = "".join(p[0].upper() for p in name.split()[:2]) if name else "U"
+
     with st.sidebar:
+        # ── Logo ──────────────────────────────────
         st.markdown("""
         <div class="sidebar-logo">
             <div class="logo-icon">GP</div>
@@ -955,6 +915,28 @@ def render_sidebar() -> None:
         </div>
         """, unsafe_allow_html=True)
 
+        # ── Perfil del usuario autenticado ────────
+        st.markdown(f"""
+        <div style="display:flex;align-items:center;gap:0.65rem;
+                    background:rgba(255,255,255,0.06);border-radius:12px;
+                    padding:0.75rem 0.9rem;margin-bottom:1rem;
+                    border:1px solid rgba(255,255,255,0.08);">
+            <div style="width:34px;height:34px;border-radius:50%;flex-shrink:0;
+                        background:linear-gradient(135deg,#e55a2b,#0d9488);
+                        display:flex;align-items:center;justify-content:center;
+                        color:white;font-size:0.75rem;font-weight:700;
+                        font-family:'Sora',sans-serif;">{initials}</div>
+            <div style="overflow:hidden;">
+                <div style="font-size:0.82rem;font-weight:600;color:#f1f5f9;
+                            font-family:'Sora',sans-serif;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{name}</div>
+                <div style="font-size:0.68rem;color:#94a3b8;font-family:'Sora',sans-serif;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{email}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Estado de la BD ───────────────────────
         db_html = (
             '<div class="db-status-ok">🟢 Supabase conectado</div>'
             if st.session_state.db_ok
@@ -962,6 +944,7 @@ def render_sidebar() -> None:
         )
         st.markdown(db_html, unsafe_allow_html=True)
 
+        # ── Navegación ────────────────────────────
         for icon, page in [
             ("📊","Dashboard"), ("✅","Tareas"), ("📅","Calendario"),
             ("👥","Equipo"),    ("🔔","Recordatorios"), ("⚡","Actividad"),
@@ -976,9 +959,12 @@ def render_sidebar() -> None:
                 st.rerun()
 
         st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-        st.markdown("<div style='height:1px;background:rgba(255,255,255,0.08);margin-bottom:0.75rem;'></div>",
-                    unsafe_allow_html=True)
+        st.markdown(
+            "<div style='height:1px;background:rgba(255,255,255,0.08);margin-bottom:0.75rem;'></div>",
+            unsafe_allow_html=True,
+        )
 
+        # ── Modo oscuro ───────────────────────────
         dark = st.toggle("🌙  Modo Oscuro", value=st.session_state.dark_mode, key="sidebar_dark_toggle")
         if dark != st.session_state.dark_mode:
             st.session_state.dark_mode = dark
@@ -988,6 +974,12 @@ def render_sidebar() -> None:
             st.session_state.active_page = "Configuración"
             st.rerun()
 
+        # ── Cerrar sesión ─────────────────────────
+        if st.button("🚪  Cerrar sesión", key="nav_logout", use_container_width=True):
+            auth_logout()
+            st.rerun()
+
+        # ── Resumen rápido ────────────────────────
         stats = get_stats()
         st.markdown(f"""
         <div style="margin-top:0.75rem;background:rgba(255,255,255,0.04);border-radius:12px;
@@ -1018,19 +1010,22 @@ def render_sidebar() -> None:
 
 
 # ══════════════════════════════════════════════
-#  PÁGINAS
+#  PÁGINAS (sin cambios respecto a v1)
 # ══════════════════════════════════════════════
 
 def render_dashboard() -> None:
     tp = THEMES["dark"]["--text-primary"] if st.session_state.dark_mode else THEMES["light"]["--text-primary"]
     ts = THEMES["dark"]["--text-secondary"] if st.session_state.dark_mode else THEMES["light"]["--text-secondary"]
 
+    user = st.session_state.get("auth_user")
+    name, _ = auth_user_display(user)
+
     st.markdown(f"""
     <div style="margin-bottom:1.5rem;">
         <div style="font-size:1.5rem;font-weight:700;color:{tp};font-family:'Sora',sans-serif;">
-            Resumen de Productividad</div>
+            Hola, {name.split()[0]} 👋</div>
         <div style="font-size:0.8rem;color:{ts};font-family:'Sora',sans-serif;">
-            Actualizado en tiempo real desde Supabase</div>
+            Resumen de productividad · Actualizado en tiempo real</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1476,25 +1471,17 @@ def render_reminders_page() -> None:
         dd         = task.get("due_date","")
         is_today   = dd == today_str
         is_overdue = dd < today_str and task["status"] != "Completada"
-
         border     = "#ef4444" if is_overdue else ("#f59e0b" if is_today else "var(--border-color)")
         alarm_icon = "🚨" if is_overdue else ("⏰" if is_today else "🔔")
         cat        = task.get("category","")
-
-        alert_txt = ""
-        if is_overdue:
-            alert_txt = "  🔴 VENCIDA"
-        elif is_today:
-            alert_txt = "  🟡 HOY"
+        alert_txt  = "  🔴 VENCIDA" if is_overdue else ("  🟡 HOY" if is_today else "")
 
         col_icon, col_body, col_badge = st.columns([1, 8, 2])
-
         with col_icon:
             st.markdown(f"""
             <div style="display:flex;align-items:center;justify-content:center;
                         height:100%;padding-top:0.5rem;font-size:1.4rem;">{alarm_icon}</div>
             """, unsafe_allow_html=True)
-
         with col_body:
             cat_html = (f'<span class="badge badge-tag">{cat}</span>' if cat else "")
             st.markdown(f"""
@@ -1508,14 +1495,14 @@ def render_reminders_page() -> None:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-
         with col_badge:
             st.markdown(
                 f'<div style="padding-top:0.5rem;">{render_priority_badge(task["priority"])}</div>',
                 unsafe_allow_html=True)
 
-        st.markdown("<div style='height:0.1rem;background:var(--border-color);margin:0.2rem 0;'></div>",
-                    unsafe_allow_html=True)
+        st.markdown(
+            "<div style='height:0.1rem;background:var(--border-color);margin:0.2rem 0;'></div>",
+            unsafe_allow_html=True)
 
 
 def render_activity_page() -> None:
@@ -1535,7 +1522,6 @@ def render_activity_page() -> None:
         <div style="text-align:center;padding:3rem;color:var(--text-secondary);font-family:'Sora',sans-serif;">
             <div style="font-size:2.5rem;margin-bottom:0.75rem;">📭</div>
             <div style="font-size:1rem;font-weight:500;">No hay actividad registrada aún</div>
-            <div style="font-size:0.82rem;margin-top:0.3rem;">Las acciones en tareas y equipos aparecerán aquí</div>
         </div>
         """, unsafe_allow_html=True)
         return
@@ -1555,7 +1541,7 @@ def render_activity_page() -> None:
     }
 
     for item in activity:
-        action     = item.get("action","")
+        action      = item.get("action","")
         icon, color = next(
             ((ic,co) for key,(ic,co) in action_icons.items() if key in action),
             ("📌","#6b7280"),
@@ -1581,20 +1567,23 @@ def render_config_page() -> None:
     st.markdown('<div class="page-title">⚙️ Configuración</div>', unsafe_allow_html=True)
     st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
 
+    user = st.session_state.get("auth_user")
+    name, email_val = auth_user_display(user)
+
     with st.expander("👤 Perfil", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            st.text_input("Nombre completo", value="Usuario Demo", key="config_name")
+            st.text_input("Nombre completo", value=name, key="config_name")
         with c2:
-            st.text_input("Email", value="usuario@gestorpro.com", key="config_email")
+            st.text_input("Email", value=email_val, key="config_email", disabled=True)
         if st.button("💾 Guardar Perfil", key="save_profile"):
             st.success("✅ Perfil actualizado correctamente.")
 
     with st.expander("🔔 Notificaciones", expanded=True):
-        st.toggle("Notificaciones de tareas",     value=True,  key="notif_tasks")
-        st.toggle("Recordatorios diarios",         value=True,  key="notif_daily")
-        st.toggle("Actualizaciones de proyectos",  value=False, key="notif_projects")
-        st.toggle("Mensajes del equipo",           value=True,  key="notif_team")
+        st.toggle("Notificaciones de tareas",    value=True,  key="notif_tasks")
+        st.toggle("Recordatorios diarios",        value=True,  key="notif_daily")
+        st.toggle("Actualizaciones de proyectos", value=False, key="notif_projects")
+        st.toggle("Mensajes del equipo",          value=True,  key="notif_team")
         if st.button("💾 Guardar Notificaciones", key="save_notifs"):
             st.success("✅ Preferencias guardadas.")
 
@@ -1604,8 +1593,9 @@ def render_config_page() -> None:
 
         st.toggle("🌙 Modo Oscuro", value=st.session_state.dark_mode,
                    key="_cfg_dark", on_change=_apply_dark)
-        st.markdown('<div class="config-hint">También puedes alternar el tema desde el panel lateral.</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="config-hint">También puedes alternar el tema desde el panel lateral.</div>',
+            unsafe_allow_html=True)
 
     with st.expander("🗄️ Gestión de Datos", expanded=False):
         col_export, col_reset = st.columns(2)
@@ -1645,6 +1635,17 @@ def render_config_page() -> None:
             st.session_state.db_ok = False
             st.rerun()
 
+    with st.expander("🔐 Cuenta", expanded=False):
+        st.markdown(
+            f'<div class="config-info"><b>Email:</b> {email_val}<br>'
+            f'<b>Proveedor:</b> Supabase Auth</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+        if st.button("🚪 Cerrar sesión", key="config_logout", use_container_width=False):
+            auth_logout()
+            st.rerun()
+
 
 # ══════════════════════════════════════════════
 #  MAIN
@@ -1652,6 +1653,27 @@ def render_config_page() -> None:
 
 def main() -> None:
     init_session_state()
+
+    # ── Guard de autenticación ─────────────────────────────────────────────
+    # Si no hay usuario en session_state, intentar restaurar desde Supabase.
+    if not st.session_state.get("auth_user"):
+        user = auth_current_user()
+        if user:
+            st.session_state.auth_user = user
+            # Recargar tareas y equipos del usuario recién restaurado
+            if not st.session_state.db_ok:
+                ok = init_db()
+                st.session_state.db_ok = ok
+                if ok:
+                    seed_sample_data()
+            st.session_state.tasks = db_load_tasks()
+            st.session_state.teams = db_load_teams()
+        else:
+            # Usuario no autenticado → mostrar páginas de auth
+            render_auth()
+            return
+
+    # ── App principal (usuario autenticado) ───────────────────────────────
     inject_css()
     render_sidebar()
 
