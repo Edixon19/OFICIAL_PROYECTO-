@@ -17,7 +17,7 @@ SUPABASE_ANON_KEY = (
     ".QNCHhCzedHSGPul5S-JWZUo3jEV6959tWoKEEeNHztA"
 )
 # ⚠️ Cambia esta URL a la de producción cuando despliegues
-SITE_URL = "http://localhost:8501"
+SITE_URL = "https://gestorpro.streamlit.app/"
 
 
 @st.cache_resource
