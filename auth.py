@@ -2,7 +2,7 @@
 GestorPro — Módulo de Autenticación con Supabase Auth
 ======================================================
 Maneja: Email/Password · Google OAuth · Registro · Recuperación de contraseña
-v3.0 — Flujo recovery eliminado de aquí; ahora vive en pages/reset_password.py
+v3.1 — redirect_to corregido; recovery aislado en pages/reset_password.py
 """
 
 import streamlit as st
@@ -18,7 +18,9 @@ SUPABASE_ANON_KEY = (
     "icm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MzM3NjYsImV4cCI6MjA5MjMwOTc2Nn0"
     ".QNCHhCzedHSGPul5S-JWZUo3jEV6959tWoKEEeNHztA"
 )
-SITE_URL = "https://gestorpro.streamlit.app/"
+
+SITE_URL  = "https://gestorpro.streamlit.app"
+RESET_URL = "https://gestorpro.streamlit.app/reset_password"
 
 
 @st.cache_resource
@@ -65,15 +67,13 @@ def auth_register(email: str, password: str, full_name: str):
 
 def auth_reset_password(email: str):
     """
-    Envía el correo de recuperación con redirect a pages/reset_password.py.
-    Supabase usará PKCE flow y enviará ?code= como query param normal.
+    Envía el correo de recuperación apuntando a /reset_password.
+    Supabase verificará el OTP y redirigirá a RESET_URL con el token.
     """
     try:
         _sb().auth.reset_password_email(
             email,
-            options={
-                "redirect_to": "https://gestorpro.streamlit.app/reset_password",
-            },
+            options={"redirect_to": RESET_URL},
         )
         return True, None
     except Exception as e:
@@ -477,8 +477,7 @@ def _render_login():
         )
         st.stop()
 
-    # ── Callback OAuth de Google: tokens en query params ──────────────────
-    # Solo procesar si NO es un token de tipo recovery (ese lo maneja reset_password.py)
+    # ── Callback OAuth de Google (access_token como query param, NO recovery) ──
     params = st.query_params
     if "access_token" in params and params.get("type", "") not in ("recovery",):
         at = params.get("access_token", "")
@@ -665,7 +664,7 @@ def _render_forgot():
                     "Correo enviado. Revisa tu bandeja de entrada y también la carpeta de spam."
                 )
             else:
-                err_lower = err.lower() if err else ""
+                err_lower = (err or "").lower()
                 if "rate limit" in err_lower:
                     st.warning(
                         "Límite de correos alcanzado. "
