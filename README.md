@@ -1,4 +1,4 @@
-# Gestor de Tareas con inicio de sesión en Streamlit y con MySQL
+# Gestor de Tareas con inicio de sesión en Streamlit y con base de datos en Supabase
 
 ## Instalación y ejecución
 
