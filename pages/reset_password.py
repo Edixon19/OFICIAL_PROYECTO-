@@ -241,33 +241,53 @@ if not st.session_state.get("_rp_session_ok") and "access_token" not in params a
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FASE 2 — Establecer sesión con los tokens recibidos como query params
+# FASE 2 — Establecer sesión con los tokens recibidos (query params o hash)
 # ─────────────────────────────────────────────────────────────────────────────
 
 if not st.session_state.get("_rp_session_ok"):
 
-    # Caso A: PKCE flow → ?code=
-    if "code" in params:
+    # ─── NUEVO: Caso con ?token= (recuperación estándar de Supabase) ───
+    if "token" in params and params.get("type") == "recovery":
+        token = params["token"]
+        try:
+            # Verificar el token OTP manualmente
+            result = _sb().auth.verify_otp({
+                "token": token,
+                "type": "recovery",
+                "email": ""  # Supabase deduce el email del token
+            })
+            if result and result.user:
+                st.session_state["_rp_session_ok"] = True
+                st.session_state["_rp_user_email"] = result.user.email
+                st.query_params.clear()
+            else:
+                _show_invalid()
+        except Exception as e:
+            st.error(f"Error al verificar token: {str(e)[:100]}")
+            _show_invalid()
+
+    # Caso A: PKCE flow → ?code= (menos común para recovery)
+    elif "code" in params:
         try:
             result = _sb().auth.exchange_code_for_session({"auth_code": params["code"]})
             if result and result.user:
-                st.session_state["_rp_session_ok"]  = True
-                st.session_state["_rp_user_email"]  = result.user.email
+                st.session_state["_rp_session_ok"] = True
+                st.session_state["_rp_user_email"] = result.user.email
                 st.query_params.clear()
             else:
                 _show_invalid()
         except Exception:
             _show_invalid()
 
-    # Caso B: Implicit flow → ?access_token= (convertido desde el hash por el JS)
+    # Caso B: Implicit flow → ?access_token= (desde hash convertido por JS)
     elif "access_token" in params and params.get("type") == "recovery":
         at = params.get("access_token", "")
         rt = params.get("refresh_token", "")
         try:
             result = _sb().auth.set_session(at, rt)
             if result and result.user:
-                st.session_state["_rp_session_ok"]  = True
-                st.session_state["_rp_user_email"]  = result.user.email
+                st.session_state["_rp_session_ok"] = True
+                st.session_state["_rp_user_email"] = result.user.email
                 st.query_params.clear()
             else:
                 _show_invalid()
