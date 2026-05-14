@@ -76,15 +76,32 @@ def auth_reset_password(email: str):
     """
     Envía un correo de recuperación de contraseña.
     Retorna (ok, error_str).
+
+    IMPORTANTE sobre redirect_to:
+      - La URL base debe estar registrada en Supabase →
+        Authentication → URL Configuration → Redirect URLs.
+      - Si redirect_to causa un error 422, se reintenta sin él
+        (Supabase usará la Site URL configurada en el panel).
     """
+    # Intento 1: con redirect_to explícito
     try:
         _sb().auth.reset_password_email(
             email,
             options={"redirect_to": f"{SITE_URL}?type=recovery"},
         )
         return True, None
-    except Exception:
-        return False, "No se pudo enviar el correo. Verifica la dirección."
+    except Exception as e:
+        err_msg = str(e)
+        # Si el error es por redirect_to no permitida (422 / redirect_uri_mismatch)
+        # reintentamos sin ese parámetro para no bloquear el envío
+        if "redirect" in err_msg.lower() or "422" in err_msg or "url" in err_msg.lower():
+            try:
+                _sb().auth.reset_password_email(email)
+                return True, None
+            except Exception as e2:
+                return False, str(e2)
+        # Cualquier otro error: devolver el mensaje real para poder depurarlo
+        return False, err_msg
 
 
 def auth_update_password(new_password: str):
@@ -854,14 +871,20 @@ def _render_forgot():
         if not email.strip():
             st.error("Ingresa tu correo electrónico.")
         else:
-            with st.spinner(""):
+            with st.spinner("Enviando..."):
                 ok, err = auth_reset_password(email.strip())
             if ok:
                 st.success(
-                    "Si ese correo está registrado, recibirás el enlace en breve."
+                    "Correo enviado. Revisa tu bandeja de entrada y también la carpeta de spam."
                 )
             else:
-                st.error(err)
+                # Mostramos el error técnico real para facilitar el diagnóstico
+                st.error(
+                    f"Error al enviar el correo: {err}\n\n"
+                    "Verifica que el correo esté registrado y que la URL de "
+                    "redirección esté permitida en Supabase → "
+                    "Authentication → URL Configuration → Redirect URLs."
+                )
 
     _spacer(0.75)
     if st.button("Volver al inicio de sesión", key="auth_back_login"):
