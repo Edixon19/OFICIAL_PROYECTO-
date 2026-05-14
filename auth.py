@@ -878,13 +878,15 @@ def _render_forgot():
                     "Correo enviado. Revisa tu bandeja de entrada y también la carpeta de spam."
                 )
             else:
-                # Mostramos el error técnico real para facilitar el diagnóstico
-                st.error(
-                    f"Error al enviar el correo: {err}\n\n"
-                    "Verifica que el correo esté registrado y que la URL de "
-                    "redirección esté permitida en Supabase → "
-                    "Authentication → URL Configuration → Redirect URLs."
-                )
+                if "rate limit" in err.lower():
+                    st.warning(
+                        "Límite de correos alcanzado. "
+                        "Supabase permite máximo 2 correos por hora en el plan gratuito. "
+                        "Espera unos minutos e inténtalo de nuevo, o revisa si el enlace "
+                        "anterior todavía está en tu bandeja de entrada."
+                    )
+                else:
+                    st.error(f"No se pudo enviar el correo: {err}")
 
     _spacer(0.75)
     if st.button("Volver al inicio de sesión", key="auth_back_login"):
