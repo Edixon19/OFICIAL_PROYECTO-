@@ -1,13 +1,25 @@
 import streamlit as st
 from supabase import create_client, Client
 import urllib.parse
+import time
 
-SUPABASE_URL = "https://wopthjsdceattleaeczt.supabase.co"
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvcHRoanNkY2VhdHRsZWFlY3p0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MzM3NjYsImV4cCI6MjA5MjMwOTc2Nn0.QNCHhCzedHSGPul5S-JWZUo3jEV6959tWoKEEeNHztA"
+# ============================================
+# CONFIGURACIÓN DE CREDENCIALES (SECRETS)
+# ============================================
+# Usamos st.secrets para que funcione tanto local como en Streamlit Cloud
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_ANON_KEY = st.secrets["SUPABASE_KEY"]
+except:
+    # Respaldo manual solo por si no has configurado los secrets aún
+    SUPABASE_URL = "https://wopthjsdceattleaeczt.supabase.co"
+    SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvcHRoanNkY2VhdHRsZWFlY3p0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MzM3NjYsImV4cCI6MjA5MjMwOTc2Nn0.QNCHhCzedHSGPul5S-JWZUo3jEV6959tWoKEEeNHztA"
 
 st.set_page_config(page_title="Nueva Contraseña — GestorPro", page_icon="🔐", layout="centered")
 
-# CSS con tus colores originales
+# ============================================
+# DISEÑO CSS PERSONALIZADO
+# ============================================
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap');
@@ -41,15 +53,16 @@ section[data-testid="stSidebar"], header[data-testid="stHeader"],
     border-radius:11px !important;
     height:46px !important;
 }
-.st-key-update_pw_btn button {
+.stButton button {
     background:linear-gradient(135deg,#e55a2b 0%,#c94d22 100%) !important;
     color:#fff !important;
     border-radius:12px !important;
     height:48px !important;
     font-weight:600 !important;
+    border: none !important;
 }
-div[data-testid="stSuccess"] { background: #d1fae5; color: #065f46; }
-div[data-testid="stError"] { background: #fee2e2; color: #991b1b; }
+div[data-testid="stSuccess"] { background: #d1fae5; color: #065f46; border-radius: 10px; }
+div[data-testid="stError"] { background: #fee2e2; color: #991b1b; border-radius: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -58,117 +71,84 @@ def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # ============================================
-# TRUCO: Usar un parámetro especial para forzar la lectura del hash
+# LÓGICA DE CAPTURA DEL TOKEN (HASH)
 # ============================================
+hash_value = st.query_params.get("_hash", "")
 
-# Si no hay token y no estamos en modo de espera, inyectar JS que redirige
-if "access_token" not in st.query_params and "token" not in st.query_params:
-    if not st.session_state.get("hash_processed"):
-        st.session_state["hash_processed"] = True
-        
-        # JavaScript que lee el hash y redirige a la misma página con query params
-        st.markdown("""
-        <script>
-        (function() {
-            var hash = window.location.hash;
-            if (hash && hash.includes('access_token')) {
-                var new_url = window.location.pathname + '?access_token=1&_hash=' + encodeURIComponent(hash.substring(1));
-                window.location.replace(new_url);
-            }
-        })();
-        </script>
-        """, unsafe_allow_html=True)
-        
-        # Mostrar mensaje de carga
-        st.markdown("""
-        <div class="auth-logo-wrap">
-            <div class="auth-logo-icon">GP</div>
-            <div class="auth-app-title">Restablecer contraseña</div>
-            <div class="auth-app-sub">Verificando enlace...</div>
-        </div>
-        """, unsafe_allow_html=True)
-        st.stop()
-
-# ============================================
-# Procesar el hash que llegó como query param
-# ============================================
-
-if "_hash" in st.query_params:
-    hash_raw = st.query_params["_hash"]
-    # Parsear el hash
-    hash_params = {}
-    for item in hash_raw.split('&'):
-        if '=' in item:
-            key, value = item.split('=', 1)
-            hash_params[key] = urllib.parse.unquote(value)
+if not hash_value:
+    # Este iframe captura el token que Supabase manda después del # y lo pasa a una query param
+    st.markdown("""
+    <iframe srcdoc='
+    <script>
+        const hash = window.parent.location.hash.substring(1);
+        if (hash) {
+            const url = new URL(window.parent.location.href);
+            url.searchParams.set("_hash", hash);
+            window.parent.location.replace(url);
+        }
+    </script>
+    ' style="display:none;"></iframe>
+    """, unsafe_allow_html=True)
     
-    # Guardar en session_state para usarlo
-    if "access_token" in hash_params:
-        st.session_state["reset_access_token"] = hash_params["access_token"]
-        st.session_state["reset_refresh_token"] = hash_params.get("refresh_token", "")
-        st.session_state["reset_type"] = hash_params.get("type", "")
-        # Limpiar query params
-        st.query_params.clear()
+    st.markdown("""
+    <div class="auth-logo-wrap">
+        <div class="auth-logo-icon">GP</div>
+        <div class="auth-app-title">Verificando...</div>
+        <div class="auth-app-sub">Espera un momento mientras validamos el enlace</div>
+    </div>
+    """, unsafe_allow_html=True)
+    time.sleep(1) # Pequeña pausa para que el JS actúe
+    st.stop()
+
+# Parsear los parámetros del hash
+hash_params = {}
+for item in hash_value.split('&'):
+    if '=' in item:
+        key, value = item.split('=', 1)
+        hash_params[key] = urllib.parse.unquote(value)
 
 # ============================================
-# MOSTRAR FORMULARIO
+# INTERFAZ DE USUARIO
 # ============================================
-
 st.markdown("""
 <div class="auth-logo-wrap">
     <div class="auth-logo-icon">GP</div>
-    <div class="auth-app-title">Restablecer contraseña</div>
-    <div class="auth-app-sub">Elige una contraseña segura</div>
+    <div class="auth-app-title">Nueva Contraseña</div>
+    <div class="auth-app-sub">Ingresa tu nueva clave para GestorPro</div>
 </div>
 """, unsafe_allow_html=True)
 
-# Verificar si tenemos token en session_state
-access_token = st.session_state.get("reset_access_token", "")
-refresh_token = st.session_state.get("reset_refresh_token", "")
-token_type = st.session_state.get("reset_type", "")
-
-if access_token and token_type == "recovery":
-    # Mostrar email si podemos decodificar
-    try:
-        import jwt
-        decoded = jwt.decode(access_token, options={"verify_signature": False})
-        user_email = decoded.get("email", "")
-        st.success(f"✅ Restableciendo para: **{user_email}**")
-    except:
-        st.success("✅ Enlace verificado correctamente")
+# Verificar si el token es de recuperación
+if "access_token" in hash_params and (hash_params.get("type") == "recovery" or hash_params.get("type") == "signup"):
+    access_token = hash_params["access_token"]
+    refresh_token = hash_params.get("refresh_token", "")
     
-    # Formulario
-    new_pw = st.text_input("Nueva contraseña", type="password", placeholder="Mínimo 6 caracteres", key="new_pw")
-    confirm_pw = st.text_input("Confirmar contraseña", type="password", placeholder="Repite la contraseña", key="confirm_pw")
-    
-    if st.button("Actualizar contraseña", key="update_pw_btn", use_container_width=True):
-        if not new_pw or len(new_pw) < 6:
-            st.error("La contraseña debe tener al menos 6 caracteres")
-        elif new_pw != confirm_pw:
-            st.error("Las contraseñas no coinciden")
-        else:
-            try:
-                sb = get_supabase()
-                session = sb.auth.set_session(access_token, refresh_token)
-                if session and session.user:
+    with st.container():
+        new_pw = st.text_input("Nueva contraseña", type="password", placeholder="Mínimo 6 caracteres")
+        confirm_pw = st.text_input("Confirmar contraseña", type="password", placeholder="Repite tu contraseña")
+        
+        if st.button("Actualizar contraseña", use_container_width=True):
+            if len(new_pw) < 6:
+                st.error("⚠️ La contraseña debe tener al menos 6 caracteres.")
+            elif new_pw != confirm_pw:
+                st.error("⚠️ Las contraseñas no coinciden.")
+            else:
+                try:
+                    sb = get_supabase()
+                    # Validar sesión con el token recibido
+                    sb.auth.set_session(access_token, refresh_token)
+                    # Actualizar la contraseña del usuario actual
                     sb.auth.update_user({"password": new_pw})
-                    sb.auth.sign_out()
-                    st.success("✅ ¡Contraseña actualizada exitosamente!")
+                    
+                    st.success("🎉 ¡Contraseña actualizada con éxito!")
                     st.balloons()
-                    # Limpiar session_state
-                    del st.session_state["reset_access_token"]
-                    del st.session_state["reset_refresh_token"]
-                    del st.session_state["reset_type"]
-                    st.markdown('<meta http-equiv="refresh" content="2; url=/" />', unsafe_allow_html=True)
-                else:
-                    st.error("❌ Enlace inválido o expirado")
-            except Exception as e:
-                error_msg = str(e).lower()
-                if "same password" in error_msg:
-                    st.error("❌ La nueva contraseña no puede ser igual a la anterior")
-                else:
-                    st.error(f"❌ Error: {error_msg[:100]}")
+                    time.sleep(2)
+                    # Redirigir al inicio (Login)
+                    st.markdown('<meta http-equiv="refresh" content="0; url=/" />', unsafe_allow_html=True)
+                    st.stop()
+                except Exception as e:
+                    st.error(f"Hubo un problema: {str(e)}")
 else:
-    st.error("❌ Enlace inválido o expirado")
-    if st.button("Volver al inicio de sesión", use_container_width=True):
+    st.error("❌ El enlace es inválido o ha expirado.")
+    if st.button("Volver al inicio"):
         st.markdown('<meta http-equiv="refresh" content="0; url=/" />', unsafe_allow_html=True)
