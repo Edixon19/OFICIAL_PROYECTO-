@@ -68,7 +68,9 @@ def auth_reset_password(email: str):
     try:
         _sb().auth.reset_password_email(
             email,
-            options={"redirect_to": f"{SITE_URL}?type=recovery"},
+            options={
+                "redirect_to": "https://gestorpro.streamlit.app/reset_password"
+                },
         )
         return True, None
     except Exception as e:
