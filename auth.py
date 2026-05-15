@@ -2,10 +2,9 @@
 GestorPro — Módulo de Autenticación con Supabase Auth
 ======================================================
 Maneja: Email/Password · Google OAuth · Registro · Recuperación de contraseña
-v3.3 — URL OAuth manual sin PKCE
+v3.4 — Fix URL OAuth (sin doble codificación)
 """
 
-import urllib.parse
 import streamlit as st
 from supabase import create_client, Client
 
@@ -77,9 +76,13 @@ def auth_reset_password(email: str):
 
 
 def auth_get_google_url():
+    """
+    Construye la URL OAuth de Google SIN codificar el redirect_to.
+    El navegador se encarga de la codificación al hacer la solicitud HTTP.
+    Codificarlo manualmente causa doble codificación → 403 Forbidden.
+    """
     try:
-        redirect = urllib.parse.quote(SITE_URL, safe="")
-        url = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={redirect}"
+        url = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={SITE_URL}"
         return url, None
     except Exception as e:
         return None, str(e)
