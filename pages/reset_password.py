@@ -72,9 +72,14 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Leer el token numérico (OTP) que manda Supabase con {{ .Token }}
+# Leer token desde query params
 otp_token  = st.query_params.get("access_token", "")
 token_type = st.query_params.get("type", "recovery")
+
+# Si llega un token nuevo, limpiar sesión anterior
+if otp_token and st.session_state.get("ultimo_token") != otp_token:
+    st.session_state.pop("access_token_jwt", None)
+    st.session_state["ultimo_token"] = otp_token
 
 if not otp_token:
     st.error("❌ El enlace es inválido o ha expirado.")
@@ -82,8 +87,7 @@ if not otp_token:
         st.switch_page("app.py")
     st.stop()
 
-# Necesitamos también el email del usuario para verificar el OTP.
-# Lo pedimos en pantalla si no lo tenemos aún.
+# Paso 1: pedir email para verificar el OTP
 if "access_token_jwt" not in st.session_state:
     email = st.text_input("Confirma tu correo electrónico", placeholder="tucorreo@gmail.com")
 
@@ -115,7 +119,7 @@ if "access_token_jwt" not in st.session_state:
                 st.error(f"Error: {str(e)}")
     st.stop()
 
-# Ya tenemos el JWT real — mostrar formulario de nueva contraseña
+# Paso 2: formulario de nueva contraseña
 access_token = st.session_state["access_token_jwt"]
 
 new_pw     = st.text_input("Nueva contraseña",     type="password", placeholder="Mínimo 6 caracteres")
@@ -146,11 +150,3 @@ if st.button("Actualizar contraseña", use_container_width=True):
                 st.error(f"Error: {response.json().get('msg', response.text)}")
         except Exception as e:
             st.error(f"Error al actualizar: {str(e)}")
-
-            otp_token  = st.query_params.get("access_token", "")
-token_type = st.query_params.get("type", "recovery")
-
-# DEBUG temporal - bórralo después de que funcione
-st.write("TOKEN:", otp_token)
-st.write("TYPE:", token_type)
-st.write("TODOS LOS PARAMS:", dict(st.query_params))
