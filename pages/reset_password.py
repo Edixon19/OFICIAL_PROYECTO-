@@ -72,38 +72,51 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Leer token_hash desde query params
-token_hash = st.query_params.get("token_hash", "")
+# Leer el token numérico (OTP) que manda Supabase con {{ .Token }}
+otp_token  = st.query_params.get("access_token", "")
 token_type = st.query_params.get("type", "recovery")
 
-if not token_hash:
+if not otp_token:
     st.error("❌ El enlace es inválido o ha expirado.")
     if st.button("Volver al inicio"):
         st.switch_page("app.py")
     st.stop()
 
-# Verificar el token_hash y obtener el access_token real
-if "access_token" not in st.session_state:
-    try:
-        resp = httpx.post(
-            f"{SUPABASE_URL}/auth/v1/verify",
-            headers={
-                "apikey": SUPABASE_ANON_KEY,
-                "Content-Type": "application/json"
-            },
-            json={"token_hash": token_hash, "type": token_type}
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            st.session_state["access_token"] = data["access_token"]
-        else:
-            st.error(f"❌ Enlace inválido o expirado: {resp.json().get('msg', '')}")
-            st.stop()
-    except Exception as e:
-        st.error(f"Error verificando el enlace: {str(e)}")
-        st.stop()
+# Necesitamos también el email del usuario para verificar el OTP.
+# Lo pedimos en pantalla si no lo tenemos aún.
+if "access_token_jwt" not in st.session_state:
+    email = st.text_input("Confirma tu correo electrónico", placeholder="tucorreo@gmail.com")
 
-access_token = st.session_state["access_token"]
+    if st.button("Continuar", use_container_width=True):
+        if not email:
+            st.error("⚠️ Ingresa tu correo.")
+        else:
+            try:
+                resp = httpx.post(
+                    f"{SUPABASE_URL}/auth/v1/verify",
+                    headers={
+                        "apikey": SUPABASE_ANON_KEY,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "type": "recovery",
+                        "token": otp_token,
+                        "email": email
+                    }
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    st.session_state["access_token_jwt"] = data["access_token"]
+                    st.rerun()
+                else:
+                    msg = resp.json().get("msg", resp.text)
+                    st.error(f"❌ {msg}")
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+    st.stop()
+
+# Ya tenemos el JWT real — mostrar formulario de nueva contraseña
+access_token = st.session_state["access_token_jwt"]
 
 new_pw     = st.text_input("Nueva contraseña",     type="password", placeholder="Mínimo 6 caracteres")
 confirm_pw = st.text_input("Confirmar contraseña", type="password", placeholder="Repite tu contraseña")
