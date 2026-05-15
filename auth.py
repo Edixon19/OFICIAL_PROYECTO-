@@ -508,10 +508,7 @@ def _render_login():
         if st.button("🔵  Google", key="auth_google_btn", use_container_width=True):
             url, err = auth_get_google_url()
             if url:
-                st.markdown(
-                    f'<meta http-equiv="refresh" content="0; url={url}">',
-                    unsafe_allow_html=True,
-                )
+                st.write("URL:", url)  # DEBUG - no redirige aún
                 st.stop()
             else:
                 st.error(f"Error OAuth: {err}")
