@@ -38,12 +38,22 @@ section[data-testid="stSidebar"], header[data-testid="stHeader"],
 }
 .auth-app-title { font-size:1.45rem; font-weight:700; color:#0f172a; }
 .auth-app-sub   { font-size:0.81rem; color:#475569; margin-top:0.15rem; text-align:center; }
+
+/* FIX: texto negro visible en inputs */
 .stTextInput > div > div > input {
-    background:#f8fafc !important;
-    border:1.5px solid #e2e8f0 !important;
-    border-radius:11px !important;
-    height:46px !important;
+    background: #f8fafc !important;
+    border: 1.5px solid #e2e8f0 !important;
+    border-radius: 11px !important;
+    height: 46px !important;
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
 }
+.stTextInput > div > div > input::placeholder {
+    color: #94a3b8 !important;
+    -webkit-text-fill-color: #94a3b8 !important;
+}
+.stTextInput label { color: #0f172a !important; font-weight: 500 !important; }
+
 .stButton button {
     background:linear-gradient(135deg,#e55a2b 0%,#c94d22 100%) !important;
     color:#fff !important;
@@ -65,23 +75,14 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-@st.cache_resource
-def get_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-
-# Leer tokens directamente desde query params (vienen de Supabase via email template)
+# Leer tokens desde query params
 access_token  = st.query_params.get("access_token", "")
 refresh_token = st.query_params.get("refresh_token", "")
-token_type    = st.query_params.get("type", "")
 
 if not access_token:
-    st.error("❌ El enlace es inválido o ha expirado. Por favor solicita uno nuevo.")
+    st.error("❌ El enlace es inválido o ha expirado.")
     if st.button("Volver al inicio"):
         st.switch_page("app.py")
-    st.stop()
-
-if token_type not in ("recovery", "signup", ""):
-    st.error("❌ Tipo de enlace no reconocido.")
     st.stop()
 
 new_pw     = st.text_input("Nueva contraseña",     type="password", placeholder="Mínimo 6 caracteres")
@@ -94,12 +95,33 @@ if st.button("Actualizar contraseña", use_container_width=True):
         st.error("⚠️ Las contraseñas no coinciden.")
     else:
         try:
-            sb = get_supabase()
+            # Crear cliente autenticado directamente con el access_token
+            # en lugar de usar set_session() que falla en versiones nuevas
+            sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
             sb.auth.set_session(access_token, refresh_token)
-            sb.auth.update_user({"password": new_pw})
-            st.success("🎉 ¡Contraseña actualizada con éxito!")
-            st.balloons()
-            time.sleep(2)
-            st.switch_page("app.py")
+            
+            # Usar el token directamente en el header para update_user
+            from supabase import Client
+            import httpx
+
+            headers = {
+                "apikey": SUPABASE_ANON_KEY,
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"
+            }
+            response = httpx.put(
+                f"{SUPABASE_URL}/auth/v1/user",
+                headers=headers,
+                json={"password": new_pw}
+            )
+
+            if response.status_code == 200:
+                st.success("🎉 ¡Contraseña actualizada con éxito!")
+                st.balloons()
+                time.sleep(2)
+                st.switch_page("app.py")
+            else:
+                st.error(f"Error del servidor: {response.text}")
+
         except Exception as e:
             st.error(f"Error al actualizar: {str(e)}")
