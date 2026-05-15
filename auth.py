@@ -84,6 +84,7 @@ def auth_get_google_url():
                 "scopes": "email profile",
             },
         })
+        st.write("URL generada:", res.url)  # DEBUG temporal
         return res.url, None
     except Exception as e:
         return None, str(e)
