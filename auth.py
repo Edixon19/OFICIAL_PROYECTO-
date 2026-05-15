@@ -2,9 +2,10 @@
 GestorPro — Módulo de Autenticación con Supabase Auth
 ======================================================
 Maneja: Email/Password · Google OAuth · Registro · Recuperación de contraseña
-v3.2 — meta refresh para OAuth redirect
+v3.3 — URL OAuth manual sin PKCE
 """
 
+import urllib.parse
 import streamlit as st
 from supabase import create_client, Client
 
@@ -77,15 +78,9 @@ def auth_reset_password(email: str):
 
 def auth_get_google_url():
     try:
-        res = _sb().auth.sign_in_with_oauth({
-            "provider": "google",
-            "options": {
-                "redirect_to": SITE_URL,
-                "scopes": "email profile",
-            },
-        })
-        st.write("URL generada:", res.url)  # DEBUG temporal
-        return res.url, None
+        redirect = urllib.parse.quote(SITE_URL, safe="")
+        url = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={redirect}"
+        return url, None
     except Exception as e:
         return None, str(e)
 
@@ -256,6 +251,7 @@ div[data-testid="stWarning"] span {
 }
 
 .st-key-auth_google_btn button,
+.st-key-auth_google_btn2 button,
 .st-key-auth_github_btn button {
     background: #ffffff !important;
     color: #1e293b !important;
@@ -269,6 +265,7 @@ div[data-testid="stWarning"] span {
     transition: all 0.2s !important;
 }
 .st-key-auth_google_btn button:hover,
+.st-key-auth_google_btn2 button:hover,
 .st-key-auth_github_btn button:hover {
     border-color: #cbd5e1 !important;
     background: #f8fafc !important;
@@ -452,6 +449,19 @@ def _pw_strength(pw: str) -> str:
     """
 
 
+def _google_redirect():
+    """Obtiene la URL de Google y redirige con meta refresh."""
+    url, err = auth_get_google_url()
+    if url:
+        st.markdown(
+            f'<meta http-equiv="refresh" content="0; url={url}">',
+            unsafe_allow_html=True,
+        )
+        st.stop()
+    else:
+        st.error(f"Error OAuth: {err}")
+
+
 # ══════════════════════════════════════════════
 #  PÁGINA: INICIO DE SESIÓN
 # ══════════════════════════════════════════════
@@ -469,7 +479,7 @@ def _render_login():
             st.error("Error al procesar la sesión de Google. Inténtalo de nuevo.")
         return
 
-    # ── Formulario de login ────────────────────────────────────────────────
+    # ── Formulario ────────────────────────────────────────────────────────
     st.markdown(_logo("GestorPro", "Bienvenido de vuelta"), unsafe_allow_html=True)
 
     email    = st.text_input("Correo electrónico", placeholder="tu@email.com", key="login_email")
@@ -506,12 +516,7 @@ def _render_login():
     col_g, col_gh = st.columns(2)
     with col_g:
         if st.button("🔵  Google", key="auth_google_btn", use_container_width=True):
-            url, err = auth_get_google_url()
-            if url:
-                st.write("URL:", url)  # DEBUG - no redirige aún
-                st.stop()
-            else:
-                st.error(f"Error OAuth: {err}")
+            _google_redirect()
     with col_gh:
         if st.button("GitHub", key="auth_github_btn", use_container_width=True):
             st.info("GitHub OAuth próximamente disponible.")
@@ -582,16 +587,8 @@ def _render_register():
 
     col_g2, _ = st.columns([1, 1])
     with col_g2:
-        if st.button("🔵  Google", key="auth_google_btn", use_container_width=True):
-            url, err = auth_get_google_url()
-            if url:
-                st.markdown(
-                    f'<meta http-equiv="refresh" content="0; url={url}">',
-                    unsafe_allow_html=True,
-                )
-                st.stop()
-            else:
-                st.error(f"Error OAuth: {err}")
+        if st.button("🔵  Google", key="auth_google_btn2", use_container_width=True):
+            _google_redirect()
 
     _spacer(0.6)
     col_txt2, col_btn2 = st.columns([5, 3])
