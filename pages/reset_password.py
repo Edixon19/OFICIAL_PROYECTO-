@@ -1,11 +1,7 @@
 import streamlit as st
 from supabase import create_client
-import urllib.parse
 import time
 
-# ============================================
-# CONFIGURACIÓN DE CREDENCIALES (SECRETS)
-# ============================================
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_ANON_KEY = st.secrets["SUPABASE_KEY"]
@@ -57,17 +53,10 @@ section[data-testid="stSidebar"], header[data-testid="stHeader"],
     border: none !important;
 }
 div[data-testid="stSuccess"] { background: #d1fae5; color: #065f46; border-radius: 10px; }
-div[data-testid="stError"] { background: #fee2e2; color: #991b1b; border-radius: 10px; }
+div[data-testid="stError"]   { background: #fee2e2; color: #991b1b; border-radius: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_resource
-def get_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-
-# ============================================
-# LOGO / HEADER
-# ============================================
 st.markdown("""
 <div class="auth-logo-wrap">
     <div class="auth-logo-icon">GP</div>
@@ -76,73 +65,41 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ============================================
-# ESTRATEGIA: leer access_token directo desde query params
-# Supabase puede enviar los tokens como query params si se configura
-# "flowType: pkce" — pero también los manda como hash.
-# La única forma de capturar el hash en Streamlit es con st.markdown JS
-# que haga un top-level redirect.
-# ============================================
+@st.cache_resource
+def get_supabase():
+    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# Intentar leer desde query params normales primero
-# (cuando ya hicimos la redirección desde el JS)
+# Leer tokens directamente desde query params (vienen de Supabase via email template)
 access_token  = st.query_params.get("access_token", "")
 refresh_token = st.query_params.get("refresh_token", "")
 token_type    = st.query_params.get("type", "")
 
 if not access_token:
-    # El JS de st.markdown SÍ corre en el contexto top-level de la página
-    # (a diferencia de components.html que usa un iframe sandboxed).
-    # Este script lee el hash y redirige con los params en la query string.
-    st.markdown("""
-    <script>
-        (function() {
-            const hash = window.location.hash.substring(1);
-            if (!hash) return;
-            const params = new URLSearchParams(hash);
-            const token = params.get('access_token');
-            if (!token) return;
-            // Construir nueva URL con los tokens como query params normales
-            const base = window.location.origin + window.location.pathname;
-            const newUrl = base
-                + '?access_token=' + encodeURIComponent(token)
-                + '&refresh_token=' + encodeURIComponent(params.get('refresh_token') || '')
-                + '&type=' + encodeURIComponent(params.get('type') || '');
-            window.location.replace(newUrl);
-        })();
-    </script>
-    <div style="text-align:center; margin-top: 2rem; color:#475569; font-size:0.9rem;">
-        ⏳ Validando el enlace de recuperación...
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
-
-# ============================================
-# FORMULARIO DE NUEVA CONTRASEÑA
-# ============================================
-if access_token and token_type in ("recovery", "signup"):
-    new_pw     = st.text_input("Nueva contraseña",     type="password", placeholder="Mínimo 6 caracteres")
-    confirm_pw = st.text_input("Confirmar contraseña", type="password", placeholder="Repite tu contraseña")
-
-    if st.button("Actualizar contraseña", use_container_width=True):
-        if len(new_pw) < 6:
-            st.error("⚠️ La contraseña debe tener al menos 6 caracteres.")
-        elif new_pw != confirm_pw:
-            st.error("⚠️ Las contraseñas no coinciden.")
-        else:
-            try:
-                sb = get_supabase()
-                sb.auth.set_session(access_token, refresh_token)
-                sb.auth.update_user({"password": new_pw})
-
-                st.success("🎉 ¡Contraseña actualizada con éxito!")
-                st.balloons()
-                time.sleep(2)
-                st.markdown('<meta http-equiv="refresh" content="0; url=/" />', unsafe_allow_html=True)
-                st.stop()
-            except Exception as e:
-                st.error(f"Huда un problema al actualizar: {str(e)}")
-else:
     st.error("❌ El enlace es inválido o ha expirado. Por favor solicita uno nuevo.")
     if st.button("Volver al inicio"):
-        st.markdown('<meta http-equiv="refresh" content="0; url=/" />', unsafe_allow_html=True)
+        st.switch_page("app.py")
+    st.stop()
+
+if token_type not in ("recovery", "signup", ""):
+    st.error("❌ Tipo de enlace no reconocido.")
+    st.stop()
+
+new_pw     = st.text_input("Nueva contraseña",     type="password", placeholder="Mínimo 6 caracteres")
+confirm_pw = st.text_input("Confirmar contraseña", type="password", placeholder="Repite tu contraseña")
+
+if st.button("Actualizar contraseña", use_container_width=True):
+    if len(new_pw) < 6:
+        st.error("⚠️ La contraseña debe tener al menos 6 caracteres.")
+    elif new_pw != confirm_pw:
+        st.error("⚠️ Las contraseñas no coinciden.")
+    else:
+        try:
+            sb = get_supabase()
+            sb.auth.set_session(access_token, refresh_token)
+            sb.auth.update_user({"password": new_pw})
+            st.success("🎉 ¡Contraseña actualizada con éxito!")
+            st.balloons()
+            time.sleep(2)
+            st.switch_page("app.py")
+        except Exception as e:
+            st.error(f"Error al actualizar: {str(e)}")
