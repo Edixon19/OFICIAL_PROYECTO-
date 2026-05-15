@@ -1,5 +1,5 @@
 import streamlit as st
-from supabase import create_client
+import httpx
 import time
 
 try:
@@ -38,8 +38,6 @@ section[data-testid="stSidebar"], header[data-testid="stHeader"],
 }
 .auth-app-title { font-size:1.45rem; font-weight:700; color:#0f172a; }
 .auth-app-sub   { font-size:0.81rem; color:#475569; margin-top:0.15rem; text-align:center; }
-
-/* FIX: texto negro visible en inputs */
 .stTextInput > div > div > input {
     background: #f8fafc !important;
     border: 1.5px solid #e2e8f0 !important;
@@ -53,7 +51,6 @@ section[data-testid="stSidebar"], header[data-testid="stHeader"],
     -webkit-text-fill-color: #94a3b8 !important;
 }
 .stTextInput label { color: #0f172a !important; font-weight: 500 !important; }
-
 .stButton button {
     background:linear-gradient(135deg,#e55a2b 0%,#c94d22 100%) !important;
     color:#fff !important;
@@ -75,15 +72,38 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Leer tokens desde query params
-access_token  = st.query_params.get("access_token", "")
-refresh_token = st.query_params.get("refresh_token", "")
+# Leer token_hash desde query params
+token_hash = st.query_params.get("token_hash", "")
+token_type = st.query_params.get("type", "recovery")
 
-if not access_token:
+if not token_hash:
     st.error("❌ El enlace es inválido o ha expirado.")
     if st.button("Volver al inicio"):
         st.switch_page("app.py")
     st.stop()
+
+# Verificar el token_hash y obtener el access_token real
+if "access_token" not in st.session_state:
+    try:
+        resp = httpx.post(
+            f"{SUPABASE_URL}/auth/v1/verify",
+            headers={
+                "apikey": SUPABASE_ANON_KEY,
+                "Content-Type": "application/json"
+            },
+            json={"token_hash": token_hash, "type": token_type}
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            st.session_state["access_token"] = data["access_token"]
+        else:
+            st.error(f"❌ Enlace inválido o expirado: {resp.json().get('msg', '')}")
+            st.stop()
+    except Exception as e:
+        st.error(f"Error verificando el enlace: {str(e)}")
+        st.stop()
+
+access_token = st.session_state["access_token"]
 
 new_pw     = st.text_input("Nueva contraseña",     type="password", placeholder="Mínimo 6 caracteres")
 confirm_pw = st.text_input("Confirmar contraseña", type="password", placeholder="Repite tu contraseña")
@@ -95,26 +115,21 @@ if st.button("Actualizar contraseña", use_container_width=True):
         st.error("⚠️ Las contraseñas no coinciden.")
     else:
         try:
-            import httpx
-
-            headers = {
-                "apikey": SUPABASE_ANON_KEY,
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json"
-            }
             response = httpx.put(
                 f"{SUPABASE_URL}/auth/v1/user",
-                headers=headers,
+                headers={
+                    "apikey": SUPABASE_ANON_KEY,
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                },
                 json={"password": new_pw}
             )
-
             if response.status_code == 200:
                 st.success("🎉 ¡Contraseña actualizada con éxito!")
                 st.balloons()
                 time.sleep(2)
                 st.switch_page("app.py")
             else:
-                st.error(f"Error del servidor: {response.text}")
-
+                st.error(f"Error: {response.json().get('msg', response.text)}")
         except Exception as e:
             st.error(f"Error al actualizar: {str(e)}")
