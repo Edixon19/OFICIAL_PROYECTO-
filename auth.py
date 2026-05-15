@@ -8,19 +8,22 @@ v3.4 — Fix URL OAuth (sin doble codificación)
 import streamlit as st
 from supabase import create_client, Client
 
+import os
+
 # ──────────────────────────────────────────────
 # CONFIG
 # ──────────────────────────────────────────────
-SUPABASE_URL      = "https://wopthjsdceattleaeczt.supabase.co"
-SUPABASE_ANON_KEY = (
+SUPABASE_URL = os.getenv("SUPABASE_PUBLIC_URL", "https://wopthjsdceattleaeczt.supabase.co")
+SUPABASE_ANON_KEY = os.getenv(
+    "SUPABASE_ANON_KEY",
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
     ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvcHRoanNkY2VhdHRsZWFlY3p0Iiw"
     "icm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MzM3NjYsImV4cCI6MjA5MjMwOTc2Nn0"
     ".QNCHhCzedHSGPul5S-JWZUo3jEV6959tWoKEEeNHztA"
 )
 
-SITE_URL  = "https://gestorpro.streamlit.app"
-RESET_URL = "https://gestorpro.streamlit.app/reset_password"
+SITE_URL  = os.getenv("SITE_URL", "https://gestorpro.streamlit.app")
+RESET_URL = os.getenv("RESET_URL", f"{SITE_URL}/reset_password")
 
 
 @st.cache_resource
@@ -57,6 +60,7 @@ def auth_register(email: str, password: str, full_name: str):
         return res.user, None
     except Exception as e:
         err = str(e)
+        print(err) 
         if "already registered" in err or "already exists" in err:
             return None, "Este correo ya está registrado. Intenta iniciar sesión."
         if "Password" in err:

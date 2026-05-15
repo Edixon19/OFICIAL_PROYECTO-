@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, date
 
 import streamlit as st
+from auth import auth_user_id
 
 # ─────────────────────────────────────────────
 # IMPORTACIÓN DE PSYCOPG2
@@ -152,12 +153,13 @@ def db_load_tasks() -> list:
 
 def db_add_task(title, description, priority, category, status, due_date, assignee, tags) -> bool:
     task_id = str(uuid.uuid4())
+    user_id = auth_user_id()
     ok = _exec(
         """INSERT INTO tasks (id,title,description,priority,category,status,
-           due_date,assignee,tags,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
+           due_date,assignee,tags,created_at,user_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)""",
         (task_id, title.strip(), description.strip(), priority, category, status,
          due_date.isoformat() if due_date else date.today().isoformat(),
-         assignee.strip(), json.dumps(tags, ensure_ascii=False), datetime.now().isoformat()),
+         assignee.strip(), json.dumps(tags, ensure_ascii=False), datetime.now().isoformat(), user_id),
     )
     if ok:
         _log_activity(assignee.strip() or "Sistema", "creó la tarea", "tarea", title.strip())
@@ -215,8 +217,9 @@ def db_load_teams() -> list:
 
 def db_create_team(name: str, description: str, leader_name: str) -> bool:
     team_id = str(uuid.uuid4())
-    ok = _exec("INSERT INTO teams (id,name,description) VALUES (%s,%s,%s)",
-               (team_id, name.strip(), description.strip()))
+    user_id = auth_user_id()
+    ok = _exec("INSERT INTO teams (id,name,description,user_id) VALUES (%s,%s,%s,%s)",
+               (team_id, name.strip(), description.strip(), user_id))
     if ok and leader_name.strip():
         _exec("INSERT INTO team_members (id,team_id,member_name,role) VALUES (%s,%s,%s,%s)",
               (str(uuid.uuid4()), team_id, leader_name.strip(), "Líder"))
@@ -267,9 +270,10 @@ def db_delete_team(team_id: str, team_name: str = "") -> bool:
 
 def _log_activity(user_name: str, action: str, entity_type: str = "",
                   entity_name: str = "", detail: str = "") -> None:
-    _exec("""INSERT INTO activity_log (id,user_name,action,entity_type,entity_name,detail)
-             VALUES (%s,%s,%s,%s,%s,%s)""",
-          (str(uuid.uuid4()), user_name, action, entity_type, entity_name, detail))
+    user_id = auth_user_id()
+    _exec("""INSERT INTO activity_log (id,user_name,action,entity_type,entity_name,detail,user_id)
+             VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+          (str(uuid.uuid4()), user_name, action, entity_type, entity_name, detail, user_id))
 
 
 def db_load_activity(limit: int = 30) -> list:
@@ -309,7 +313,7 @@ def seed_sample_data() -> None:
     if row and int(row.get("cnt", 0)) == 0:
         for t in _get_sample_tasks():
             _exec("""INSERT INTO tasks (id,title,description,priority,category,status,
-                     due_date,assignee,tags,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
+                     due_date,assignee,tags,created_at,user_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)""",
                   (t["id"], t["title"], t["description"], t["priority"], t["category"],
                    t["status"], t["due_date"], t["assignee"],
-                   json.dumps(t["tags"]), t["created_at"]))
+                   json.dumps(t["tags"]), t["created_at"], None))
