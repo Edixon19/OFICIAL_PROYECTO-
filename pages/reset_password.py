@@ -95,13 +95,6 @@ if st.button("Actualizar contraseña", use_container_width=True):
         st.error("⚠️ Las contraseñas no coinciden.")
     else:
         try:
-            # Crear cliente autenticado directamente con el access_token
-            # en lugar de usar set_session() que falla en versiones nuevas
-            sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-            sb.auth.set_session(access_token, refresh_token)
-            
-            # Usar el token directamente en el header para update_user
-            from supabase import Client
             import httpx
 
             headers = {
