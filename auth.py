@@ -2,7 +2,7 @@
 GestorPro — Módulo de Autenticación con Supabase Auth
 ======================================================
 Maneja: Email/Password · Google OAuth · Registro · Recuperación de contraseña
-v3.4 — Fix URL OAuth (sin doble codificación)
+v3.5 — Redirección OAuth con st.link_button
 """
 
 import streamlit as st
@@ -75,12 +75,7 @@ def auth_reset_password(email: str):
         return False, str(e)
 
 
-def auth_get_google_url():
-    """
-    Construye la URL OAuth de Google SIN codificar el redirect_to.
-    El navegador se encarga de la codificación al hacer la solicitud HTTP.
-    Codificarlo manualmente causa doble codificación → 403 Forbidden.
-    """
+def auth_get_google_url() -> tuple:
     try:
         url = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={SITE_URL}"
         return url, None
@@ -253,9 +248,10 @@ div[data-testid="stWarning"] span {
     box-shadow: 0 7px 22px rgba(229,90,43,0.45) !important;
 }
 
-.st-key-auth_google_btn button,
-.st-key-auth_google_btn2 button,
-.st-key-auth_github_btn button {
+/* link_button de Google — apunta al <a> que genera st.link_button */
+.st-key-auth_google_btn a,
+.st-key-auth_google_btn2 a,
+.st-key-auth_github_btn a {
     background: #ffffff !important;
     color: #1e293b !important;
     border: 1.5px solid #e2e8f0 !important;
@@ -264,12 +260,16 @@ div[data-testid="stWarning"] span {
     font-weight: 500 !important;
     font-size: 0.88rem !important;
     height: 46px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     box-shadow: 0 1px 4px rgba(0,0,0,0.06) !important;
     transition: all 0.2s !important;
+    text-decoration: none !important;
 }
-.st-key-auth_google_btn button:hover,
-.st-key-auth_google_btn2 button:hover,
-.st-key-auth_github_btn button:hover {
+.st-key-auth_google_btn a:hover,
+.st-key-auth_google_btn2 a:hover,
+.st-key-auth_github_btn a:hover {
     border-color: #cbd5e1 !important;
     background: #f8fafc !important;
     transform: translateY(-1px) !important;
@@ -452,15 +452,11 @@ def _pw_strength(pw: str) -> str:
     """
 
 
-def _google_redirect():
-    """Obtiene la URL de Google y redirige con meta refresh."""
+def _google_button(key: str):
+    """Renderiza st.link_button apuntando directamente a la URL OAuth de Google."""
     url, err = auth_get_google_url()
     if url:
-        st.markdown(
-            f'<meta http-equiv="refresh" content="0; url={url}">',
-            unsafe_allow_html=True,
-        )
-        st.stop()
+        st.link_button("🔵  Google", url, use_container_width=True, key=key)
     else:
         st.error(f"Error OAuth: {err}")
 
@@ -518,8 +514,7 @@ def _render_login():
 
     col_g, col_gh = st.columns(2)
     with col_g:
-        if st.button("🔵  Google", key="auth_google_btn", use_container_width=True):
-            _google_redirect()
+        _google_button("auth_google_btn")
     with col_gh:
         if st.button("GitHub", key="auth_github_btn", use_container_width=True):
             st.info("GitHub OAuth próximamente disponible.")
@@ -590,8 +585,7 @@ def _render_register():
 
     col_g2, _ = st.columns([1, 1])
     with col_g2:
-        if st.button("🔵  Google", key="auth_google_btn2", use_container_width=True):
-            _google_redirect()
+        _google_button("auth_google_btn2")
 
     _spacer(0.6)
     col_txt2, col_btn2 = st.columns([5, 3])
