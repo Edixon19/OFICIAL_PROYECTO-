@@ -2,7 +2,7 @@
 GestorPro — Módulo de Autenticación con Supabase Auth
 ======================================================
 Maneja: Email/Password · Google OAuth · Registro · Recuperación de contraseña
-v3.1 — redirect_to corregido; recovery aislado en pages/reset_password.py
+v3.2 — meta refresh para OAuth redirect
 """
 
 import streamlit as st
@@ -25,7 +25,6 @@ RESET_URL = "https://gestorpro.streamlit.app/reset_password"
 
 @st.cache_resource
 def _sb() -> Client:
-    """Instancia cacheada del cliente Supabase."""
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 
@@ -66,10 +65,6 @@ def auth_register(email: str, password: str, full_name: str):
 
 
 def auth_reset_password(email: str):
-    """
-    Envía el correo de recuperación apuntando a /reset_password.
-    Supabase verificará el OTP y redirigirá a RESET_URL con el token.
-    """
     try:
         _sb().auth.reset_password_email(
             email,
@@ -461,23 +456,7 @@ def _pw_strength(pw: str) -> str:
 # ══════════════════════════════════════════════
 
 def _render_login():
-    # ── Redirect pendiente a Google OAuth ─────────────────────────────────
-    if "_redirect_to" in st.session_state:
-        url = st.session_state.pop("_redirect_to")
-        st.markdown(
-            f'<script>window.top.location.replace("{url}");</script>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f'Redirigiendo a Google... '
-            f'<a href="{url}" target="_self" '
-            f'style="color:#e55a2b;font-weight:600;font-family:Sora,sans-serif;">'
-            f'Haz clic aquí</a> si no redirige automáticamente.',
-            unsafe_allow_html=True,
-        )
-        st.stop()
-
-    # ── Callback OAuth de Google (access_token como query param, NO recovery) ──
+    # ── Callback OAuth de Google ───────────────────────────────────────────
     params = st.query_params
     if "access_token" in params and params.get("type", "") not in ("recovery",):
         at = params.get("access_token", "")
@@ -493,9 +472,7 @@ def _render_login():
     st.markdown(_logo("GestorPro", "Bienvenido de vuelta"), unsafe_allow_html=True)
 
     email    = st.text_input("Correo electrónico", placeholder="tu@email.com", key="login_email")
-    password = st.text_input(
-        "Contraseña", placeholder="••••••••", key="login_pass", type="password"
-    )
+    password = st.text_input("Contraseña", placeholder="••••••••", key="login_pass", type="password")
 
     col_rem, col_forgot = st.columns([3, 2])
     with col_rem:
@@ -527,11 +504,14 @@ def _render_login():
 
     col_g, col_gh = st.columns(2)
     with col_g:
-        if st.button("Google", key="auth_google_btn", use_container_width=True):
+        if st.button("🔵  Google", key="auth_google_btn", use_container_width=True):
             url, err = auth_get_google_url()
             if url:
-                st.session_state._redirect_to = url
-                st.rerun()
+                st.markdown(
+                    f'<meta http-equiv="refresh" content="0; url={url}">',
+                    unsafe_allow_html=True,
+                )
+                st.stop()
             else:
                 st.error(f"Error OAuth: {err}")
     with col_gh:
@@ -562,14 +542,6 @@ def _render_login():
 # ══════════════════════════════════════════════
 
 def _render_register():
-    if "_redirect_to" in st.session_state:
-        url = st.session_state.pop("_redirect_to")
-        st.markdown(
-            f'<script>window.top.location.replace("{url}");</script>',
-            unsafe_allow_html=True,
-        )
-        st.stop()
-
     st.markdown(_logo("Crear cuenta", "Únete a GestorPro hoy"), unsafe_allow_html=True)
 
     full_name = st.text_input("Nombre completo", placeholder="Ana García", key="reg_name")
@@ -612,11 +584,14 @@ def _render_register():
 
     col_g2, _ = st.columns([1, 1])
     with col_g2:
-        if st.button("Google", key="auth_google_btn", use_container_width=True):
+        if st.button("🔵  Google", key="auth_google_btn", use_container_width=True):
             url, err = auth_get_google_url()
             if url:
-                st.session_state._redirect_to = url
-                st.rerun()
+                st.markdown(
+                    f'<meta http-equiv="refresh" content="0; url={url}">',
+                    unsafe_allow_html=True,
+                )
+                st.stop()
             else:
                 st.error(f"Error OAuth: {err}")
 
@@ -647,9 +622,7 @@ def _render_forgot():
     </div>
     """, unsafe_allow_html=True)
 
-    email = st.text_input(
-        "Correo electrónico", placeholder="tu@email.com", key="forgot_email"
-    )
+    email = st.text_input("Correo electrónico", placeholder="tu@email.com", key="forgot_email")
 
     _spacer(0.4)
 
@@ -660,9 +633,7 @@ def _render_forgot():
             with st.spinner("Enviando..."):
                 ok, err = auth_reset_password(email.strip())
             if ok:
-                st.success(
-                    "Correo enviado. Revisa tu bandeja de entrada y también la carpeta de spam."
-                )
+                st.success("Correo enviado. Revisa tu bandeja de entrada y también la carpeta de spam.")
             else:
                 err_lower = (err or "").lower()
                 if "rate limit" in err_lower:
