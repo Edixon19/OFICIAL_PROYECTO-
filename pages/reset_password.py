@@ -146,3 +146,11 @@ if st.button("Actualizar contraseña", use_container_width=True):
                 st.error(f"Error: {response.json().get('msg', response.text)}")
         except Exception as e:
             st.error(f"Error al actualizar: {str(e)}")
+
+            otp_token  = st.query_params.get("access_token", "")
+token_type = st.query_params.get("type", "recovery")
+
+# DEBUG temporal - bórralo después de que funcione
+st.write("TOKEN:", otp_token)
+st.write("TYPE:", token_type)
+st.write("TODOS LOS PARAMS:", dict(st.query_params))
