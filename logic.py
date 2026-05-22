@@ -26,24 +26,28 @@ from database import (
 #  (llaman a database.py y sincronizan session_state)
 # ══════════════════════════════════════════════
 
-def add_task(title, description, priority, category, status, due_date, assignee, tags) -> None:
-    if db_add_task(title, description, priority, category, status, due_date, assignee, tags):
-        st.session_state.tasks = db_load_tasks()
+def add_task(title, description, priority, category, status, due_date, assignee, tags,
+             team_id=None) -> None:
+    # Usa el equipo activo de la sesión si no se especifica
+    if team_id is None:
+        team_id = st.session_state.get("active_team_id")
+    if db_add_task(title, description, priority, category, status, due_date, assignee, tags, team_id):
+        st.session_state.tasks = db_load_tasks(team_id=team_id)
 
 
 def update_task(task_id, **kwargs) -> None:
     if db_update_task(task_id, **kwargs):
-        st.session_state.tasks = db_load_tasks()
+        st.session_state.tasks = db_load_tasks(team_id=st.session_state.get("active_team_id"))
 
 
 def delete_task(task_id, task_title="") -> None:
     if db_delete_task(task_id, task_title):
-        st.session_state.tasks = db_load_tasks()
+        st.session_state.tasks = db_load_tasks(team_id=st.session_state.get("active_team_id"))
 
 
 def toggle_task_status(task_id, current_status, title="") -> None:
     if db_toggle_task_status(task_id, current_status, title):
-        st.session_state.tasks = db_load_tasks()
+        st.session_state.tasks = db_load_tasks(team_id=st.session_state.get("active_team_id"))
 
 
 # ══════════════════════════════════════════════
@@ -85,13 +89,25 @@ def get_stats() -> dict:
 # ══════════════════════════════════════════════
 
 def render_priority_badge(priority: str) -> str:
-    icons = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}
+    icons = {
+        "Alta": '<span class="material-symbols-rounded" style="font-size: 1.1em; vertical-align: middle;">keyboard_double_arrow_up</span>',
+        "Media": '<span class="material-symbols-rounded" style="font-size: 1.1em; vertical-align: middle;">drag_handle</span>',
+        "Baja": '<span class="material-symbols-rounded" style="font-size: 1.1em; vertical-align: middle;">keyboard_double_arrow_down</span>',
+        "High": '<span class="material-symbols-rounded" style="font-size: 1.1em; vertical-align: middle;">keyboard_double_arrow_up</span>',
+        "Medium": '<span class="material-symbols-rounded" style="font-size: 1.1em; vertical-align: middle;">drag_handle</span>',
+        "Low": '<span class="material-symbols-rounded" style="font-size: 1.1em; vertical-align: middle;">keyboard_double_arrow_down</span>'
+    }
+    display_priority = {"High": "Alta", "Medium": "Media", "Low": "Baja"}.get(priority, priority)
     return (f'<span class="badge badge-priority-{priority.lower()}">'
-            f'{icons.get(priority, "⚪")} {priority}</span>')
+            f'{icons.get(priority, "")} {display_priority}</span>')
 
 
 def render_status_badge(status: str) -> str:
-    icons = {"Pendiente": "⏳", "Activa": "🔵", "Completada": "✅"}
+    icons = {
+        "Pendiente": '<span class="material-symbols-rounded" style="font-size: 1.1em; vertical-align: middle;">hourglass_empty</span>',
+        "Activa": '<span class="material-symbols-rounded" style="font-size: 1.1em; vertical-align: middle;">play_circle</span>',
+        "Completada": '<span class="material-symbols-rounded" style="font-size: 1.1em; vertical-align: middle;">check_circle</span>'
+    }
     return (f'<span class="badge badge-status-{status.lower()}">'
             f'{icons.get(status, "")} {status}</span>')
 

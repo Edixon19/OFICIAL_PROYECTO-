@@ -29,6 +29,8 @@ from database import (
     db_move_member,
     db_remove_member,
     db_delete_team,
+    db_get_user_teams,
+    db_is_team_owner,
 )
 from logic import (
     add_task,
@@ -50,7 +52,7 @@ from logic import (
 # ─────────────────────────────────────────────
 st.set_page_config(
     page_title="GestorPro",
-    page_icon="🎯",
+    page_icon=":material/target:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -138,6 +140,9 @@ def init_session_state() -> None:
         "confirm_delete_team_id": None,
         "search_query":           "",
         "managing_team_id":       None,
+        # ── Contexto de equipo ────────────────
+        "active_team_id":         None,   # None = espacio personal
+        "user_teams":             [],     # equipos del usuario para el selector
         # ── Base de datos ────────────────────
         "db_ok":                  False,
         # ── Autenticación ────────────────────
@@ -157,7 +162,10 @@ def init_session_state() -> None:
             seed_sample_data()
 
     if st.session_state.get("auth_user"):
-        st.session_state.tasks = db_load_tasks()
+        # Cargar equipos del usuario para el selector del sidebar
+        st.session_state.user_teams = db_get_user_teams()
+        # Cargar tareas filtradas por el equipo activo
+        st.session_state.tasks = db_load_tasks(team_id=st.session_state.active_team_id)
         st.session_state.teams = db_load_teams()
     else:
         st.session_state.setdefault("tasks", [])
@@ -175,6 +183,7 @@ def inject_css() -> None:
     css = f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0');
 
     :root {{
 {css_vars}
@@ -185,8 +194,8 @@ def inject_css() -> None:
         font-family: 'Sora', sans-serif !important;
         color: var(--text-primary) !important;
     }}
-    #MainMenu, footer, header {{ visibility: hidden; }}
-    .stDeployButton {{ display: none; }}
+    #MainMenu, header, [data-testid="stHeader"] {{ display: none !important; }}
+    .stDeployButton {{ display: none !important; }}
 
     /* ── Sidebar fijo ── */
     [data-testid="collapsedControl"],
@@ -258,8 +267,15 @@ def inject_css() -> None:
     }}
 
     /* ── Main content ── */
-    .main .block-container {{
-        padding: 1.5rem 2rem !important;
+    .main .block-container,
+    .stMainBlockContainer,
+    [data-testid="stAppViewBlockContainer"],
+    [data-testid="stMainBlockContainer"],
+    [data-testid="block-container"] {{
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
         max-width: 1400px !important;
     }}
 
@@ -454,7 +470,7 @@ def inject_css() -> None:
     }}
 
     /* Nivel 4 DANGER */
-    [class*="st-key-delete_btn_"] button, [class*="st-key-del_team_"] button,
+    [class*="st-key-del_team_"] button,
     [class*="st-key-confirm_yes_"] button,[class*="st-key-conf_del_team_"] button,
     [class*="st-key-remove_member_"] button {{
         background: rgba(239,68,68,0.08) !important;
@@ -462,7 +478,7 @@ def inject_css() -> None:
         border: 1.5px solid rgba(239,68,68,0.4) !important;
         box-shadow: none !important;
     }}
-    [class*="st-key-delete_btn_"] button:hover, [class*="st-key-del_team_"] button:hover,
+    [class*="st-key-del_team_"] button:hover,
     [class*="st-key-confirm_yes_"] button:hover,[class*="st-key-conf_del_team_"] button:hover,
     [class*="st-key-remove_member_"] button:hover {{
         background: rgba(239,68,68,0.16) !important;
@@ -526,7 +542,35 @@ def inject_css() -> None:
         font-size: 1.3rem; margin-bottom: 0.75rem;
     }}
 
-    /* ── Task cards ── */
+    /* ── Task card wrapper (unified card with inline actions) ── */
+    /* ── Task card wrapper (keyed st.container) ── */
+    [class*="st-key-task_wrapper_"] {{
+        background: var(--bg-card); border-radius: 14px;
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow); margin-bottom: 0.7rem; transition: all 0.2s;
+        padding: 0; overflow: hidden;
+    }}
+    [class*="st-key-task_wrapper_"]:hover {{ box-shadow: var(--shadow-hover); border-color: rgba(229,90,43,0.3); }}
+
+    /* Inner card content — transparent, inherits from wrapper */
+    [class*="st-key-task_wrapper_"] .task-card {{
+        background: transparent; border: none;
+        box-shadow: none; margin: 0; border-radius: 0;
+        padding: 1.1rem 1.4rem;
+    }}
+    [class*="st-key-task_wrapper_"] .task-card:hover {{ box-shadow: none; border-color: transparent; }}
+
+    /* Actions column inside card — vertically centered, left border */
+    [class*="st-key-task_wrapper_"] [data-testid="stColumn"]:last-child {{
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: center !important;
+        
+        padding: 0.5rem 0.3rem !important;
+    }}
+
+    /* Standalone task-card (dashboard recent tasks, calendar, etc.) */
     .task-card {{
         background: var(--bg-card); border-radius: 14px;
         padding: 1.1rem 1.4rem; border: 1px solid var(--border-color);
@@ -547,6 +591,92 @@ def inject_css() -> None:
     }}
     .task-meta {{
         font-size: 0.78rem; color: var(--card-meta); font-family: 'Sora', sans-serif;
+    }}
+
+
+    /* ── Task action icon buttons ── */
+    .task-actions-col {{
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        padding: 0.25rem 0;
+    }}
+    /* Toggle (complete / reactivate) */
+    [class*="st-key-toggle_"] button {{
+        width: 36px !important; height: 36px !important;
+        min-height: 36px !important; max-width: 36px !important;
+        padding: 0 !important;
+        border-radius: 10px !important;
+        display: inline-flex !important; align-items: center !important; justify-content: center !important;
+        background: rgba(34,197,94,0.10) !important;
+        color: #16a34a !important;
+        border: 1.5px solid rgba(34,197,94,0.30) !important;
+        box-shadow: none !important;
+        transition: all 0.18s ease !important;
+    }}
+    [class*="st-key-toggle_"] button:hover {{
+        background: rgba(34,197,94,0.22) !important;
+        border-color: #16a34a !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 3px 10px rgba(34,197,94,0.20) !important;
+    }}
+    /* Toggle — reactivate variant (amber) */
+    [class*="st-key-toggle_"] button[data-reactivate] {{
+        background: rgba(245,158,11,0.10) !important;
+        color: #d97706 !important;
+        border-color: rgba(245,158,11,0.30) !important;
+    }}
+    /* Edit icon button */
+    [class*="st-key-edit_btn_"] button {{
+        width: 36px !important; height: 36px !important;
+        min-height: 36px !important; max-width: 36px !important;
+        padding: 0 !important;
+        border-radius: 10px !important;
+        display: inline-flex !important; align-items: center !important; justify-content: center !important;
+        background: rgba(13,148,136,0.10) !important;
+        color: #0d9488 !important;
+        border: 1.5px solid rgba(13,148,136,0.30) !important;
+        box-shadow: none !important;
+        transition: all 0.18s ease !important;
+    }}
+    [class*="st-key-edit_btn_"] button:hover {{
+        background: rgba(13,148,136,0.22) !important;
+        border-color: #0d9488 !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 3px 10px rgba(13,148,136,0.20) !important;
+    }}
+    /* Delete icon button */
+    [class*="st-key-delete_btn_"] button {{
+        width: 36px !important; height: 36px !important;
+        min-height: 36px !important; max-width: 36px !important;
+        padding: 0 !important;
+        border-radius: 10px !important;
+        display: inline-flex !important; align-items: center !important; justify-content: center !important;
+        background: rgba(239,68,68,0.08) !important;
+        color: #ef4444 !important;
+        border: 1.5px solid rgba(239,68,68,0.30) !important;
+        box-shadow: none !important;
+        transition: all 0.18s ease !important;
+    }}
+    [class*="st-key-delete_btn_"] button:hover {{
+        background: rgba(239,68,68,0.20) !important;
+        border-color: #ef4444 !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 3px 10px rgba(239,68,68,0.20) !important;
+    }}
+    /* Hide text inside task action buttons, show only icon */
+    [class*="st-key-toggle_"] button p,
+    [class*="st-key-edit_btn_"] button p,
+    [class*="st-key-delete_btn_"] button p {{
+        display: none !important;
+    }}
+    [class*="st-key-toggle_"] button [data-testid="stIconMaterial"],
+    [class*="st-key-edit_btn_"] button [data-testid="stIconMaterial"],
+    [class*="st-key-delete_btn_"] button [data-testid="stIconMaterial"] {{
+        margin: 0 !important;
+        font-size: 1.15rem !important;
     }}
 
     /* ── Badges ── */
@@ -690,6 +820,45 @@ def inject_css() -> None:
     .logo-text {{ font-size: 1.1rem; font-weight: 700; color: #f1f5f9; font-family: 'Sora', sans-serif; }}
     .logo-sub  {{ font-size: 0.7rem; color: #94a3b8; font-family: 'Sora', sans-serif; }}
 
+    /* ── Botones Sidebar (Navbar) ── */
+    div[class*="st-key-nav_"] button {{
+        justify-content: flex-start !important;
+        text-align: left !important;
+        padding-left: 1rem !important;
+    }}
+    div[class*="st-key-nav_"] button div {{
+        display: flex !important;
+        justify-content: flex-start !important;
+        align-items: center !important;
+        width: 100% !important;
+    }}
+    div[class*="st-key-nav_"] button p {{
+        text-align: left !important;
+        margin: 0 !important;
+        width: 100% !important;
+    }}
+
+    /* ── Sidebar team selector ── */
+    section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {{
+        background: rgba(255,255,255,0.06) !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+        border-radius: 10px !important;
+        color: #f1f5f9 !important;
+        font-family: 'Sora', sans-serif !important;
+        font-size: 0.84rem !important;
+        font-weight: 600 !important;
+        min-height: 38px !important;
+    }}
+    section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div:hover {{
+        border-color: rgba(229,90,43,0.4) !important;
+    }}
+    section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] svg {{
+        fill: #94a3b8 !important;
+    }}
+    section[data-testid="stSidebar"] .stSelectbox label {{
+        color: #94a3b8 !important;
+    }}
+
     /* ── Configuración ── */
     .config-label {{
         font-size: 0.85rem; font-weight: 500;
@@ -705,6 +874,24 @@ def inject_css() -> None:
         color: var(--text-primary); line-height: 1.7;
     }}
     .config-info b {{ color: var(--text-primary); }}
+    /* ── Perfil fijo ── */
+    [data-testid="stSidebarContent"] {{
+        padding-bottom: 80px !important;
+    }}
+
+    /* ── Ocultar navegación por defecto de Streamlit ── */
+    [data-testid="stSidebarNav"] {{
+        display: none !important;
+    }}
+
+    /* ── Ocultar el header vacío del sidebar para eliminar el espacio superior ── */
+    [data-testid="stSidebarHeader"] {{
+        display: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        height: 0 !important;
+        min-height: 0 !important;
+    }}
     </style>
     """
 
@@ -736,12 +923,26 @@ def inject_css() -> None:
                 sidebar.style.minWidth = '240px';
                 sidebar.style.visibility = 'visible';
                 sidebar.style.display = 'block';
+                
+                var p = document.getElementById('user-profile-fixed');
+                if (p) p.style.width = sidebar.offsetWidth + 'px';
             }
         }
         removeCollapseBtn();
         new MutationObserver(removeCollapseBtn).observe(document.body, { childList: true, subtree: true });
         var c = 0;
         var iv = setInterval(function() { removeCollapseBtn(); if (++c >= 10) clearInterval(iv); }, 500);
+        
+        // Resize observer para que el perfil siempre coincida con el sidebar
+        var ro = new ResizeObserver(function() {
+            var s = document.querySelector('section[data-testid="stSidebar"]');
+            var p = document.getElementById('user-profile-fixed');
+            if (s && p) p.style.width = s.offsetWidth + 'px';
+        });
+        setTimeout(function() {
+            var s = document.querySelector('section[data-testid="stSidebar"]');
+            if (s) ro.observe(s);
+        }, 1000);
     })();
     </script>
     """
@@ -756,42 +957,46 @@ def inject_css() -> None:
 
 def render_task_card(task: dict) -> None:
     is_completed = task["status"] == "Completada"
-    card_class   = "task-card completed" if is_completed else "task-card"
+    completed_class = " completed" if is_completed else ""
     tags_html    = " ".join(render_tag_badge(t) for t in task.get("tags", []))
-    due_str      = f"📅 {task.get('due_date','')}" if task.get("due_date") else ""
-    asgn_str     = f"👤 {task['assignee']}"         if task.get("assignee") else ""
+    due_str      = f'<span class="material-symbols-rounded" style="vertical-align: middle; font-size: inherit;">calendar_month</span> {task.get("due_date","")}' if task.get("due_date") else ""
+    asgn_str     = f'<span class="material-symbols-rounded" style="vertical-align: middle; font-size: inherit;">person</span> {task["assignee"]}'         if task.get("assignee") else ""
     meta_html    = " &nbsp;·&nbsp; ".join(p for p in [due_str, asgn_str] if p)
 
-    st.markdown(f"""
-    <div class="{card_class}">
-        <div class="task-title">{task['title']}</div>
-        <div class="task-desc">{task.get('description','')}</div>
-        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:0.3rem;margin-bottom:0.4rem;">
-            {render_priority_badge(task['priority'])}{render_status_badge(task['status'])}
-        </div>
-        <div style="margin-bottom:0.3rem;">{tags_html}</div>
-        <div class="task-meta">{meta_html}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Use a keyed container so CSS can target it, with columns inside for layout
+    with st.container(key=f"task_wrapper_{task['id']}"):
+        col_card, col_actions = st.columns([6, 1])
 
-    c_check, c_edit, c_del, _ = st.columns([1, 1, 1, 4])
-    with c_check:
-        lbl = "↩ Reactivar" if is_completed else "✓ Completar"
-        if st.button(lbl, key=f"toggle_{task['id']}", use_container_width=True):
-            toggle_task_status(task["id"], task["status"], task["title"])
-            st.rerun()
-    with c_edit:
-        if st.button("✏️ Editar", key=f"edit_btn_{task['id']}", use_container_width=True):
-            st.session_state.editing_task_id = (
-                None if st.session_state.editing_task_id == task["id"] else task["id"])
-            st.rerun()
-    with c_del:
-        if st.button("🗑️ Eliminar", key=f"delete_btn_{task['id']}", use_container_width=True):
-            st.session_state.confirm_delete_id = task["id"]
-            st.rerun()
+        with col_card:
+            st.markdown(f"""
+            <div class="task-card{completed_class}">
+                <div class="task-title">{task['title']}</div>
+                <div class="task-desc">{task.get('description','')}</div>
+                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:0.3rem;margin-bottom:0.4rem;">
+                    {render_priority_badge(task['priority'])}{render_status_badge(task['status'])}
+                </div>
+                <div style="margin-bottom:0.3rem;">{tags_html}</div>
+                <div class="task-meta">{meta_html}</div>
+            </div>
+            """, unsafe_allow_html=True) 
+
+
+        with col_actions:
+            toggle_icon = ":material/undo:" if is_completed else ":material/check:"
+            toggle_tip  = "Reactivar" if is_completed else "Completar"
+            if st.button(" ", icon=toggle_icon, key=f"toggle_{task['id']}", help=toggle_tip):
+                toggle_task_status(task["id"], task["status"], task["title"])
+                st.rerun()
+            if st.button(" ", icon=":material/edit:", key=f"edit_btn_{task['id']}", help="Editar"):
+                st.session_state.editing_task_id = (
+                    None if st.session_state.editing_task_id == task["id"] else task["id"])
+                st.rerun()
+            if st.button(" ", icon=":material/delete:", key=f"delete_btn_{task['id']}", help="Eliminar"):
+                st.session_state.confirm_delete_id = task["id"]
+                st.rerun()
 
     if st.session_state.confirm_delete_id == task["id"]:
-        st.markdown('<div class="confirm-delete-box">⚠️ ¿Confirmar eliminación? No se puede deshacer.</div>',
+        st.markdown('<div class="confirm-delete-box"><span class="material-symbols-rounded">warning</span> ¿Confirmar eliminación? No se puede deshacer.</div>',
                     unsafe_allow_html=True)
         cy, cn = st.columns(2)
         with cy:
@@ -812,7 +1017,7 @@ def render_task_card(task: dict) -> None:
 
 
 def render_edit_form(task: dict) -> None:
-    st.markdown('<div class="form-container"><div class="form-title">✏️ Editar Tarea</div>',
+    st.markdown('<div class="form-container"><div class="form-title"><span class="material-symbols-rounded">edit</span> Editar Tarea</div>',
                 unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
@@ -824,6 +1029,7 @@ def render_edit_form(task: dict) -> None:
     with c2:
         np_ = st.selectbox("Prioridad", PRIORITIES,
                             index=PRIORITIES.index(task["priority"]) if task["priority"] in PRIORITIES else 0,
+                            format_func=lambda x: {"High": "Alta", "Medium": "Media", "Low": "Baja"}.get(x, x),
                             key=f"edit_priority_{task['id']}")
         nc  = st.selectbox("Categoría", CATEGORIES,
                             index=CATEGORIES.index(task["category"]) if task["category"] in CATEGORIES else 0,
@@ -840,7 +1046,7 @@ def render_edit_form(task: dict) -> None:
                               key=f"edit_tags_{task['id']}")
     cs, cc = st.columns([1, 3])
     with cs:
-        if st.button("💾 Guardar", key=f"save_{task['id']}", use_container_width=True):
+        if st.button("Guardar", icon=":material/save:", key=f"save_{task['id']}", use_container_width=True):
             if not nt.strip():
                 st.error("El título es obligatorio.")
             else:
@@ -849,7 +1055,7 @@ def render_edit_form(task: dict) -> None:
                             due_date=ndate.isoformat(), assignee=na.strip(),
                             tags=[t.strip() for t in tags_str.split(",") if t.strip()])
                 st.session_state.editing_task_id = None
-                st.success("✅ Tarea actualizada.")
+                st.success(":material/check_circle: Tarea actualizada.")
                 st.rerun()
     with cc:
         if st.button("Cancelar", key=f"cancel_edit_{task['id']}"):
@@ -858,9 +1064,29 @@ def render_edit_form(task: dict) -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_new_task_form() -> None:
-    st.markdown('<div class="form-container"><div class="form-title">➕ Nueva Tarea</div>',
-                unsafe_allow_html=True)
+def render_new_task_page() -> None:
+    if st.button(" ", icon=":material/arrow_back:", key="btn_back_new_task", help="Volver"):
+        st.session_state.active_page = "Tareas"
+        st.rerun()
+
+    st.markdown('<div class="page-title"><span class="material-symbols-rounded">add</span> Nueva Tarea</div>', unsafe_allow_html=True)
+
+    # Indicador del espacio de trabajo activo
+    active_team_id = st.session_state.get("active_team_id")
+    if active_team_id:
+        team_name = next((t["name"] for t in st.session_state.get("user_teams", [])
+                          if t["id"] == active_team_id), "Equipo")
+        workspace_label = f'<span class="material-symbols-rounded" style="font-size:inherit;vertical-align:middle;">groups</span> {team_name}'
+    else:
+        workspace_label = '<span class="material-symbols-rounded" style="font-size:inherit;vertical-align:middle;">person</span> Mi Espacio Personal'
+    st.markdown(
+        f'<div class="page-subtitle">Añade una nueva tarea a: '
+        f'<span style="font-weight:600;color:var(--accent-primary);">{workspace_label}</span></div>',
+        unsafe_allow_html=True)
+
+    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="form-container">', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
         title    = st.text_input("Título *", placeholder="¿Qué necesitas hacer?", key="new_title")
@@ -869,7 +1095,8 @@ def render_new_task_form() -> None:
         assignee = st.text_input("Asignado a", placeholder="Nombre del responsable",
                                   key="new_assignee")
     with c2:
-        priority = st.selectbox("Prioridad", PRIORITIES, key="new_priority")
+        priority = st.selectbox("Prioridad", PRIORITIES, key="new_priority",
+                                format_func=lambda x: {"High": "Alta", "Medium": "Media", "Low": "Baja"}.get(x, x))
         category = st.selectbox("Categoría", CATEGORIES, key="new_category")
         status   = st.selectbox("Estado inicial", STATUS_OPTIONS, key="new_status")
         due_date = st.date_input("Fecha límite", value=date.today(), key="new_date")
@@ -877,18 +1104,18 @@ def render_new_task_form() -> None:
                                 placeholder="ej: diseño, urgente", key="new_tags")
     cb, cc, _ = st.columns([1, 1, 4])
     with cb:
-        if st.button("✅ Crear Tarea", key="btn_create_task", use_container_width=True):
+        if st.button("Crear Tarea", icon=":material/check_circle:", key="btn_create_task", use_container_width=True):
             if not title.strip():
-                st.error("⚠️ El título es obligatorio.")
+                st.error(":material/warning: El título es obligatorio.")
             else:
                 tags = [t.strip() for t in tags_input.split(",") if t.strip()]
                 add_task(title, desc, priority, category, status, due_date, assignee, tags)
-                st.session_state.show_new_task_form = False
-                st.success(f"✅ Tarea '{title.strip()}' creada.")
+                st.session_state.active_page = "Tareas"
+                st.success(f":material/check_circle: Tarea '{title.strip()}' creada.")
                 st.rerun()
     with cc:
         if st.button("Cancelar", key="btn_cancel_new"):
-            st.session_state.show_new_task_form = False
+            st.session_state.active_page = "Tareas"
             st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -915,39 +1142,42 @@ def render_sidebar() -> None:
         </div>
         """, unsafe_allow_html=True)
 
-        # ── Perfil del usuario autenticado ────────
-        st.markdown(f"""
-        <div style="display:flex;align-items:center;gap:0.65rem;
-                    background:rgba(255,255,255,0.06);border-radius:12px;
-                    padding:0.75rem 0.9rem;margin-bottom:1rem;
-                    border:1px solid rgba(255,255,255,0.08);">
-            <div style="width:34px;height:34px;border-radius:50%;flex-shrink:0;
-                        background:linear-gradient(135deg,#e55a2b,#0d9488);
-                        display:flex;align-items:center;justify-content:center;
-                        color:white;font-size:0.75rem;font-weight:700;
-                        font-family:'Sora',sans-serif;">{initials}</div>
-            <div style="overflow:hidden;">
-                <div style="font-size:0.82rem;font-weight:600;color:#f1f5f9;
-                            font-family:'Sora',sans-serif;
-                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{name}</div>
-                <div style="font-size:0.68rem;color:#94a3b8;font-family:'Sora',sans-serif;
-                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{email}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
 
-        # ── Estado de la BD ───────────────────────
-        db_html = (
-            '<div class="db-status-ok">🟢 Supabase conectado</div>'
-            if st.session_state.db_ok
-            else '<div class="db-status-err">🔴 Sin conexión BD</div>'
+        # ── Selector de equipo ─────────────────────
+        user_teams = st.session_state.get("user_teams", [])
+        team_options = [{"id": None, "name": "Mi Espacio Personal"}] + user_teams
+        team_names = [t["name"] for t in team_options]
+        # Encontrar índice del equipo activo
+        active_id = st.session_state.active_team_id
+        current_idx = 0
+        for i, t in enumerate(team_options):
+            if t["id"] == active_id:
+                current_idx = i
+                break
+
+        selected_team_name = st.selectbox(
+            "Espacio de trabajo",
+            team_names,
+            index=current_idx,
+            key="sidebar_team_selector",
+            label_visibility="collapsed",
         )
-        st.markdown(db_html, unsafe_allow_html=True)
+        # Resolver el ID del equipo seleccionado
+        selected_team = next(t for t in team_options if t["name"] == selected_team_name)
+        if selected_team["id"] != st.session_state.active_team_id:
+            st.session_state.active_team_id = selected_team["id"]
+            st.session_state.tasks = db_load_tasks(team_id=selected_team["id"])
+            st.rerun()
+
+        st.markdown(
+            "<div style='height:1px;background:rgba(255,255,255,0.08);margin:0.5rem 0 0.75rem;'></div>",
+            unsafe_allow_html=True,
+        )
 
         # ── Navegación ────────────────────────────
         for icon, page in [
-            ("📊","Dashboard"), ("✅","Tareas"), ("📅","Calendario"),
-            ("👥","Equipo"),    ("🔔","Recordatorios"), ("⚡","Actividad"),
+            (":material/dashboard:","Dashboard"), (":material/check:","Tareas"), (":material/calendar_view_month:","Calendario"),
+            (":material/groups:","Equipo"),    (":material/notifications_active:","Recordatorios"), (":material/bolt:","Actividad"),
         ]:
             if st.button(f"{icon}  {page}", key=f"nav_{page}", use_container_width=True):
                 st.session_state.active_page        = page
@@ -965,48 +1195,40 @@ def render_sidebar() -> None:
         )
 
         # ── Modo oscuro ───────────────────────────
-        dark = st.toggle("🌙  Modo Oscuro", value=st.session_state.dark_mode, key="sidebar_dark_toggle")
+        dark = st.toggle(":material/dark_mode:  Modo Oscuro", value=st.session_state.dark_mode, key="sidebar_dark_toggle")
         if dark != st.session_state.dark_mode:
             st.session_state.dark_mode = dark
             st.rerun()
 
-        if st.button("⚙️  Configuración", key="nav_config", use_container_width=True):
+        if st.button("Configuración", icon=":material/settings:", key="nav_config", use_container_width=True):
             st.session_state.active_page = "Configuración"
             st.rerun()
 
         # ── Cerrar sesión ─────────────────────────
-        if st.button("🚪  Cerrar sesión", key="nav_logout", use_container_width=True):
+        if st.button("Cerrar sesión", icon=":material/logout:", key="nav_logout", use_container_width=True):
             auth_logout()
             st.rerun()
 
-        # ── Resumen rápido ────────────────────────
-        stats = get_stats()
+        # ── Perfil del usuario autenticado (Fijo al fondo) ────────
         st.markdown(f"""
-        <div style="margin-top:0.75rem;background:rgba(255,255,255,0.04);border-radius:12px;
-                    padding:1rem;border:1px solid rgba(255,255,255,0.07);">
-            <div style="font-size:0.75rem;color:#94a3b8;font-family:'Sora',sans-serif;
-                        margin-bottom:0.6rem;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;">
-                Resumen Rápido</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
-                <div style="text-align:center;">
-                    <div style="font-size:1.4rem;font-weight:700;color:#f1f5f9;font-family:'Sora',sans-serif;">{stats['total']}</div>
-                    <div style="font-size:0.68rem;color:#94a3b8;font-family:'Sora',sans-serif;">Total</div>
-                </div>
-                <div style="text-align:center;">
-                    <div style="font-size:1.4rem;font-weight:700;color:#22c55e;font-family:'Sora',sans-serif;">{stats['completed']}</div>
-                    <div style="font-size:0.68rem;color:#94a3b8;font-family:'Sora',sans-serif;">Completadas</div>
-                </div>
-                <div style="text-align:center;">
-                    <div style="font-size:1.4rem;font-weight:700;color:#f59e0b;font-family:'Sora',sans-serif;">{stats['pending']}</div>
-                    <div style="font-size:0.68rem;color:#94a3b8;font-family:'Sora',sans-serif;">Pendientes</div>
-                </div>
-                <div style="text-align:center;">
-                    <div style="font-size:1.4rem;font-weight:700;color:#e55a2b;font-family:'Sora',sans-serif;">{stats['completion_rate']}%</div>
-                    <div style="font-size:0.68rem;color:#94a3b8;font-family:'Sora',sans-serif;">Tasa</div>
-                </div>
+        <div id="user-profile-fixed" style="position:fixed;bottom:0;left:0;display:flex;align-items:center;gap:0.65rem;
+                    background:var(--bg-sidebar);padding:1rem;
+                    border-top:1px solid rgba(255,255,255,0.08);z-index:9999;">
+            <div style="width:34px;height:34px;border-radius:50%;flex-shrink:0;
+                        background:linear-gradient(135deg,#e55a2b,#0d9488);
+                        display:flex;align-items:center;justify-content:center;
+                        color:white;font-size:0.75rem;font-weight:700;
+                        font-family:'Sora',sans-serif;">{initials}</div>
+            <div style="overflow:hidden;">
+                <div style="font-size:0.82rem;font-weight:600;color:#f1f5f9;
+                            font-family:'Sora',sans-serif;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{name}</div>
+                <div style="font-size:0.68rem;color:#94a3b8;font-family:'Sora',sans-serif;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{email}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
+
 
 
 # ══════════════════════════════════════════════
@@ -1023,50 +1245,20 @@ def render_dashboard() -> None:
     st.markdown(f"""
     <div style="margin-bottom:1.5rem;">
         <div style="font-size:1.5rem;font-weight:700;color:{tp};font-family:'Sora',sans-serif;">
-            Hola, {name.split()[0]} 👋</div>
+            Hola, {name.split()[0]} <span class="material-symbols-rounded">waving_hand</span></div>
         <div style="font-size:0.8rem;color:{ts};font-family:'Sora',sans-serif;">
             Resumen de productividad · Actualizado en tiempo real</div>
     </div>
     """, unsafe_allow_html=True)
-
-    qa1, qa2, qa3, qa4 = st.columns(4)
-    for col, emoji, bg, label, sub in [
-        (qa1,"🟠","#fff3ee","Nueva Tarea","Crear tarea rápida"),
-        (qa2,"🟢","#eefbf7","Vista Rápida","Tareas urgentes"),
-        (qa3,"🟡","#fffbea","Invitar Equipo","Agregar miembros"),
-        (qa4,"🔵","#eef4ff","Nuevo Equipo","Iniciar equipo"),
-    ]:
-        with col:
-            st.markdown(f"""
-            <div style="background:var(--bg-card);border-radius:14px;padding:1.25rem;
-                        border:1px solid var(--border-color);box-shadow:var(--shadow);
-                        text-align:center;margin-bottom:0.5rem;min-height:90px;
-                        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.4rem;">
-                <div style="width:36px;height:36px;border-radius:9px;background:{bg};
-                            display:flex;align-items:center;justify-content:center;font-size:1.1rem;">{emoji}</div>
-                <div style="font-size:0.82rem;font-weight:600;color:var(--text-primary);font-family:'Sora',sans-serif;">{label}</div>
-                <div style="font-size:0.72rem;color:var(--text-secondary);font-family:'Sora',sans-serif;">{sub}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    with qa1:
-        if st.button("+ Crear tarea", key="dash_new_task", use_container_width=True):
-            st.session_state.active_page        = "Tareas"
-            st.session_state.show_new_task_form = True
-            st.rerun()
-    with qa4:
-        if st.button("+ Crear equipo", key="dash_new_team", use_container_width=True):
-            st.session_state.active_page        = "Equipo"
-            st.session_state.show_new_team_form = True
-            st.rerun()
+    
 
     stats = get_stats()
     s1, s2, s3, s4 = st.columns(4)
     for col, icon, bg, val, lbl, delta, pos in [
-        (s1,"📋","#fff3ee",stats["completed"],"Completadas",f"▲ +{stats['completed']} tareas",True),
-        (s2,"⏳","#fff8ee",stats["pending"],"Pendientes","▼ Por completar",False),
-        (s3,"🔥","#eefbf7",stats["active"],"Tareas activas","▲ En progreso",True),
-        (s4,"🎯","#eef4ff",f"{stats['completion_rate']}%","Tasa finalización","▲ Tiempo real",True),
+        (s1,'<span class="material-symbols-rounded">assignment</span>',"#fff3ee",stats["completed"],"Completadas",f"▲ +{stats['completed']} tareas",True),
+        (s2,'<span class="material-symbols-rounded">hourglass_empty</span>',"#fff8ee",stats["pending"],"Pendientes","▼ Por completar",False),
+        (s3,'<span class="material-symbols-rounded">local_fire_department</span>',"#eefbf7",stats["active"],"Tareas activas","▲ En progreso",True),
+        (s4,'<span class="material-symbols-rounded">target</span>',"#eef4ff",f"{stats['completion_rate']}%","Tasa finalización","▲ Tiempo real",True),
     ]:
         with col:
             cls = "positive" if pos else "negative"
@@ -1082,7 +1274,7 @@ def render_dashboard() -> None:
     col_chart, col_dist = st.columns(2)
 
     with col_chart:
-        st.markdown('<div class="section-title">📈 Tareas por Categoría</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title"><span class="material-symbols-rounded">trending_up</span> Tareas por Categoría</div>', unsafe_allow_html=True)
         counts = {}
         for t in st.session_state.tasks:
             counts[t.get("category","Otro")] = counts.get(t.get("category","Otro"), 0) + 1
@@ -1095,7 +1287,7 @@ def render_dashboard() -> None:
             st.info("No hay datos.")
 
     with col_dist:
-        st.markdown('<div class="section-title">🍩 Distribución por Estado</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title"><span class="material-symbols-rounded">pie_chart</span> Distribución por Estado</div>', unsafe_allow_html=True)
         total = stats["total"] or 1
         for st_name, count, color in [
             ("Completada", stats["completed"], "#22c55e"),
@@ -1115,7 +1307,7 @@ def render_dashboard() -> None:
             </div>
             """, unsafe_allow_html=True)
 
-    st.markdown('<div class="section-title">📋 Tareas Recientes</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title"><span class="material-symbols-rounded">assignment</span> Tareas Recientes</div>', unsafe_allow_html=True)
     for task in sorted(st.session_state.tasks, key=lambda x: x.get("created_at",""), reverse=True)[:4]:
         st.markdown(f"""
         <div class="task-card" style="margin-bottom:0.5rem;">
@@ -1135,20 +1327,25 @@ def render_dashboard() -> None:
 def render_tasks_page() -> None:
     col_h, col_btn = st.columns([3, 1])
     with col_h:
-        st.markdown('<div class="page-title">Mis Tareas</div>', unsafe_allow_html=True)
-        st.markdown('<div class="page-subtitle">Gestiona y organiza todas tus tareas</div>',
+        # Mostrar nombre del espacio activo
+        active_tid = st.session_state.get("active_team_id")
+        if active_tid:
+            workspace_name = next((t["name"] for t in st.session_state.get("user_teams", [])
+                                   if t["id"] == active_tid), "Equipo")
+        else:
+            workspace_name = "Mi Espacio Personal"
+        st.markdown(f'<div class="page-title">Tareas · {workspace_name}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="page-subtitle">Gestiona y organiza las tareas de este espacio</div>',
                     unsafe_allow_html=True)
     with col_btn:
         st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
-        if st.button("➕ Nueva Tarea", key="open_new_task", use_container_width=True):
-            st.session_state.show_new_task_form = not st.session_state.show_new_task_form
+        if st.button("Nueva Tarea", icon=":material/add:", key="open_new_task", use_container_width=True):
+            st.session_state.active_page = "Nueva Tarea"
             st.rerun()
 
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-    if st.session_state.show_new_task_form:
-        render_new_task_form()
 
-    search = st.text_input("🔍 Buscar tareas...", value=st.session_state.search_query,
+    search = st.text_input(":material/search: Buscar tareas...", value=st.session_state.search_query,
                            placeholder="Buscar por título, descripción o etiquetas...",
                            key="search_input")
     if search != st.session_state.search_query:
@@ -1173,7 +1370,7 @@ def render_tasks_page() -> None:
     if not filtered:
         st.markdown("""
         <div style="text-align:center;padding:3rem;color:var(--text-secondary);font-family:'Sora',sans-serif;">
-            <div style="font-size:2.5rem;margin-bottom:0.75rem;">📭</div>
+            <div style="font-size:2.5rem;margin-bottom:0.75rem;"><span class="material-symbols-rounded">inbox</span></div>
             <div style="font-size:1rem;font-weight:500;">No se encontraron tareas</div>
         </div>
         """, unsafe_allow_html=True)
@@ -1183,7 +1380,7 @@ def render_tasks_page() -> None:
 
 
 def render_calendar_page() -> None:
-    st.markdown('<div class="page-title">📅 Calendario</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-title"><span class="material-symbols-rounded">calendar_month</span> Calendario</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="page-subtitle">Vista de {date.today().strftime("%B %Y")}</div>',
                 unsafe_allow_html=True)
     st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
@@ -1210,7 +1407,7 @@ def render_calendar_page() -> None:
         <div style="font-size:0.88rem;font-weight:700;color:var(--text-primary);
                     font-family:'Sora',sans-serif;margin:1rem 0 0.5rem;
                     padding-left:0.5rem;border-left:3px solid var(--accent-primary);">
-            {display}{"  🔵 HOY" if is_today else ""}
+            {display}{'  <span class="material-symbols-rounded">circle</span> HOY' if is_today else ""}
         </div>
         """, unsafe_allow_html=True)
         for task in tasks_by_date[date_str]:
@@ -1233,19 +1430,19 @@ def render_calendar_page() -> None:
 def render_team_page() -> None:
     col_h, col_btn = st.columns([3, 1])
     with col_h:
-        st.markdown('<div class="page-title">👥 Equipos</div>', unsafe_allow_html=True)
+        st.markdown('<div class="page-title"><span class="material-symbols-rounded">group</span> Equipos</div>', unsafe_allow_html=True)
         st.markdown('<div class="page-subtitle">Crea y gestiona tus equipos de trabajo</div>',
                     unsafe_allow_html=True)
     with col_btn:
         st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
-        if st.button("➕ Nuevo Equipo", key="open_new_team", use_container_width=True):
+        if st.button("Nuevo Equipo", icon=":material/add:", key="open_new_team", use_container_width=True):
             st.session_state.show_new_team_form = not st.session_state.show_new_team_form
             st.rerun()
 
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
     if st.session_state.show_new_team_form:
-        st.markdown('<div class="form-container"><div class="form-title">🏗️ Crear Nuevo Equipo</div>',
+        st.markdown('<div class="form-container"><div class="form-title"><span class="material-symbols-rounded">construction</span> Crear Nuevo Equipo</div>',
                     unsafe_allow_html=True)
         c1, c2 = st.columns(2)
         with c1:
@@ -1255,30 +1452,27 @@ def render_team_page() -> None:
                                         placeholder="¿Cuál es el propósito?",
                                         key="new_team_desc", height=80)
         with c2:
-            leader_name = st.text_input("Tu nombre (serás el Líder) *",
-                                         placeholder="ej: Ana García", key="new_team_leader")
             st.markdown("""
             <div style="background:rgba(229,90,43,0.08);border-radius:10px;padding:0.75rem 1rem;
                         border:1px solid rgba(229,90,43,0.2);margin-top:0.5rem;">
                 <div style="font-size:0.8rem;color:var(--text-primary);font-family:'Sora',sans-serif;font-weight:600;">
-                    📌 Roles disponibles:</div>
+                    <span class="material-symbols-rounded">push_pin</span> Serás añadido automáticamente como Líder</div>
                 <div style="font-size:0.75rem;color:var(--text-secondary);font-family:'Sora',sans-serif;margin-top:0.3rem;">
-                    🟠 <b>Líder</b>: Gestiona equipo · 🔵 <b>Miembro</b>: Participa<br>
-                    🟢 <b>Editor</b>: Edita tareas · ⚪ <b>Viewer</b>: Solo lectura</div>
+                    <span class="material-symbols-rounded">circle</span> <b>Líder</b>: Gestiona equipo · <span class="material-symbols-rounded">circle</span> <b>Miembro</b>: Participa<br>
+                    <span class="material-symbols-rounded">circle</span> <b>Editor</b>: Edita tareas · <span class="material-symbols-rounded">circle_outline</span> <b>Viewer</b>: Solo lectura</div>
             </div>
             """, unsafe_allow_html=True)
         cs, cc, _ = st.columns([1, 1, 3])
         with cs:
-            if st.button("✅ Crear Equipo", key="btn_create_team", use_container_width=True):
+            if st.button("Crear Equipo", icon=":material/check_circle:", key="btn_create_team", use_container_width=True):
                 if not team_name.strip():
                     st.error("El nombre del equipo es obligatorio.")
-                elif not leader_name.strip():
-                    st.error("Debes ingresar tu nombre como líder.")
                 else:
-                    if db_create_team(team_name, team_desc, leader_name):
+                    if db_create_team(team_name, team_desc):
                         st.session_state.show_new_team_form = False
                         st.session_state.teams = db_load_teams()
-                        st.success(f"✅ Equipo '{team_name}' creado.")
+                        st.session_state.user_teams = db_get_user_teams()
+                        st.success(f":material/check_circle: Equipo '{team_name}' creado.")
                         st.rerun()
         with cc:
             if st.button("Cancelar", key="btn_cancel_team"):
@@ -1290,7 +1484,7 @@ def render_team_page() -> None:
     if not teams:
         st.markdown("""
         <div style="text-align:center;padding:3rem;color:var(--text-secondary);font-family:'Sora',sans-serif;">
-            <div style="font-size:2.5rem;margin-bottom:0.75rem;">👥</div>
+            <div style="font-size:2.5rem;margin-bottom:0.75rem;"><span class="material-symbols-rounded">group</span></div>
             <div style="font-size:1rem;font-weight:500;">No hay equipos creados</div>
         </div>
         """, unsafe_allow_html=True)
@@ -1311,7 +1505,7 @@ def render_team_page() -> None:
                 </div>
                 <div style="font-size:0.75rem;color:var(--text-secondary);font-family:'Sora',sans-serif;
                             text-align:right;flex-shrink:0;">
-                    👑 Líder: {leader['member_name'] if leader else 'Sin líder'}<br>
+                    <span class="material-symbols-rounded">stars</span> Líder: {leader['member_name'] if leader else 'Sin líder'}<br>
                     <span style="color:var(--accent-primary);font-weight:600;">{len(members)} miembros</span>
                 </div>
             </div>
@@ -1337,20 +1531,23 @@ def render_team_page() -> None:
 
         st.markdown("</div></div>", unsafe_allow_html=True)
 
-        col_manage, col_del_team, _ = st.columns([1, 1, 4])
-        with col_manage:
-            open_lbl = "🔽 Cerrar" if st.session_state.managing_team_id == team["id"] else "⚙️ Gestionar"
-            if st.button(open_lbl, key=f"manage_{team['id']}", use_container_width=True):
-                st.session_state.managing_team_id = (
-                    None if st.session_state.managing_team_id == team["id"] else team["id"])
-                st.rerun()
-        with col_del_team:
-            if st.button("🗑️ Eliminar equipo", key=f"del_team_{team['id']}", use_container_width=True):
-                st.session_state.confirm_delete_team_id = team["id"]
-                st.rerun()
+        # Solo el creador del equipo puede gestionar/eliminar
+        is_owner = db_is_team_owner(team["id"])
+        if is_owner:
+            col_manage, col_del_team, _ = st.columns([1, 1, 4])
+            with col_manage:
+                open_lbl = ":material/expand_more: Cerrar" if st.session_state.managing_team_id == team["id"] else ":material/settings: Gestionar"
+                if st.button(open_lbl, key=f"manage_{team['id']}", use_container_width=True):
+                    st.session_state.managing_team_id = (
+                        None if st.session_state.managing_team_id == team["id"] else team["id"])
+                    st.rerun()
+            with col_del_team:
+                if st.button("Eliminar equipo", icon=":material/delete:", key=f"del_team_{team['id']}", use_container_width=True):
+                    st.session_state.confirm_delete_team_id = team["id"]
+                    st.rerun()
 
         if st.session_state.get("confirm_delete_team_id") == team["id"]:
-            st.markdown('<div class="confirm-delete-box">⚠️ ¿Eliminar el equipo y todos sus miembros?</div>',
+            st.markdown('<div class="confirm-delete-box"><span class="material-symbols-rounded">warning</span> ¿Eliminar el equipo y todos sus miembros?</div>',
                         unsafe_allow_html=True)
             cy, cn = st.columns(2)
             with cy:
@@ -1358,6 +1555,11 @@ def render_team_page() -> None:
                     db_delete_team(team["id"], team["name"])
                     st.session_state.confirm_delete_team_id = None
                     st.session_state.teams = db_load_teams()
+                    st.session_state.user_teams = db_get_user_teams()
+                    # Si el equipo eliminado era el activo, volver al espacio personal
+                    if st.session_state.active_team_id == team["id"]:
+                        st.session_state.active_team_id = None
+                        st.session_state.tasks = db_load_tasks(team_id=None)
                     st.success("Equipo eliminado.")
                     st.rerun()
             with cn:
@@ -1370,13 +1572,13 @@ def render_team_page() -> None:
             <div style="background:var(--bg-card);border-radius:14px;padding:1.25rem;
                         border:1px solid var(--border-color);margin-top:0.5rem;margin-bottom:0.5rem;">
             """, unsafe_allow_html=True)
-            tab_add, tab_manage = st.tabs(["➕ Agregar miembro", "🔧 Gestionar miembros"])
+            tab_add, tab_manage = st.tabs([":material/add: Agregar miembro", ":material/build: Gestionar miembros"])
 
             with tab_add:
                 cnm, cnr, cnb = st.columns([2, 1, 1])
                 with cnm:
-                    new_member_name = st.text_input("Nombre del miembro",
-                                                     placeholder="ej: Carlos Ruiz",
+                    new_member_email = st.text_input("Correo del miembro",
+                                                     placeholder="ej: usuario@email.com",
                                                      key=f"new_member_{team['id']}")
                 with cnr:
                     new_member_role = st.selectbox("Rol", TEAM_ROLES,
@@ -1384,14 +1586,16 @@ def render_team_page() -> None:
                 with cnb:
                     st.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
                     if st.button("Agregar", key=f"add_member_{team['id']}", use_container_width=True):
-                        if not new_member_name.strip():
-                            st.error("Ingresa el nombre del miembro.")
+                        if not new_member_email.strip():
+                            st.error("Ingresa el correo del miembro.")
                         else:
-                            ok = db_add_member(team["id"], new_member_name, new_member_role, team["name"])
+                            ok, err = db_add_member(team["id"], new_member_email, new_member_role, team["name"])
                             if ok:
                                 st.session_state.teams = db_load_teams()
-                                st.success(f"✅ {new_member_name} agregado como {new_member_role}.")
+                                st.success(f":material/check_circle: Miembro agregado como {new_member_role}.")
                                 st.rerun()
+                            elif err:
+                                st.error(err)
 
             with tab_manage:
                 if not members:
@@ -1412,7 +1616,7 @@ def render_team_page() -> None:
                                                      key=f"role_sel_{m['id']}",
                                                      label_visibility="collapsed")
                             if new_role != m["role"]:
-                                if st.button("✓", key=f"save_role_{m['id']}", help="Guardar rol"):
+                                if st.button(" ", icon=":material/check:", key=f"save_role_{m['id']}", help="Guardar rol"):
                                     db_update_member_role(m["id"], new_role, m["member_name"])
                                     st.session_state.teams = db_load_teams()
                                     st.rerun()
@@ -1421,7 +1625,7 @@ def render_team_page() -> None:
                                 target_name = st.selectbox(
                                     "Mover a", [t["name"] for t in other_teams],
                                     key=f"move_target_{m['id']}", label_visibility="collapsed")
-                                if st.button("↗ Mover", key=f"move_member_{m['id']}", use_container_width=True):
+                                if st.button("Mover", icon=":material/arrow_outward:", key=f"move_member_{m['id']}", use_container_width=True):
                                     target = next(t for t in other_teams if t["name"]==target_name)
                                     if db_move_member(m["id"], target["id"], m["member_name"], target["name"]):
                                         st.session_state.teams = db_load_teams()
@@ -1433,7 +1637,7 @@ def render_team_page() -> None:
                                     "padding-top:0.5rem;'>Sin otros equipos</div>",
                                     unsafe_allow_html=True)
                         with c_rem:
-                            if st.button("✕", key=f"remove_member_{m['id']}",
+                            if st.button(" ", icon=":material/close:", key=f"remove_member_{m['id']}",
                                           help=f"Remover a {m['member_name']}"):
                                 if db_remove_member(m["id"], m["member_name"], team["name"]):
                                     st.session_state.teams = db_load_teams()
@@ -1450,12 +1654,11 @@ def render_team_page() -> None:
 def render_reminders_page() -> None:
     col_h, col_btn = st.columns([3, 1])
     with col_h:
-        st.markdown('<div class="page-title">🔔 Recordatorios</div>', unsafe_allow_html=True)
+        st.markdown('<div class="page-title"><span class="material-symbols-rounded">notifications</span> Recordatorios</div>', unsafe_allow_html=True)
     with col_btn:
         st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
-        if st.button("➕ Nueva Tarea", key="new_reminder_btn", use_container_width=True):
-            st.session_state.active_page        = "Tareas"
-            st.session_state.show_new_task_form = True
+        if st.button("Nueva Tarea", icon=":material/add:", key="new_reminder_btn", use_container_width=True):
+            st.session_state.active_page        = "Nueva Tarea"
             st.rerun()
 
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
@@ -1472,9 +1675,9 @@ def render_reminders_page() -> None:
         is_today   = dd == today_str
         is_overdue = dd < today_str and task["status"] != "Completada"
         border     = "#ef4444" if is_overdue else ("#f59e0b" if is_today else "var(--border-color)")
-        alarm_icon = "🚨" if is_overdue else ("⏰" if is_today else "🔔")
+        alarm_icon = '<span class="material-symbols-rounded">error</span>' if is_overdue else ('<span class="material-symbols-rounded">alarm</span>' if is_today else '<span class="material-symbols-rounded">notifications</span>')
         cat        = task.get("category","")
-        alert_txt  = "  🔴 VENCIDA" if is_overdue else ("  🟡 HOY" if is_today else "")
+        alert_txt  = '  <span class="material-symbols-rounded">circle</span> VENCIDA' if is_overdue else ('  <span class="material-symbols-rounded">circle</span> HOY' if is_today else "")
 
         col_icon, col_body, col_badge = st.columns([1, 8, 2])
         with col_icon:
@@ -1490,7 +1693,7 @@ def render_reminders_page() -> None:
                 <div class="reminder-title">{task['title']}</div>
                 <div class="reminder-desc">{task.get('description','')}</div>
                 <div class="reminder-meta">
-                    📅 {dd} &nbsp; {cat_html}
+                    <span class="material-symbols-rounded" style="vertical-align: middle; font-size: inherit;">calendar_month</span> {dd} &nbsp; {cat_html}
                     <span style="font-weight:600;">{alert_txt}</span>
                 </div>
             </div>
@@ -1506,45 +1709,45 @@ def render_reminders_page() -> None:
 
 
 def render_activity_page() -> None:
-    st.markdown('<div class="page-title">⚡ Actividad Reciente</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-title"><span class="material-symbols-rounded">bolt</span> Actividad Reciente</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">Registro en tiempo real de todas las acciones</div>',
                 unsafe_allow_html=True)
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
     col_ref, _ = st.columns([1, 5])
     with col_ref:
-        if st.button("🔄 Actualizar", key="refresh_activity", use_container_width=True):
+        if st.button("Actualizar", icon=":material/refresh:", key="refresh_activity", use_container_width=True):
             st.rerun()
 
     activity = db_load_activity(limit=30)
     if not activity:
         st.markdown("""
         <div style="text-align:center;padding:3rem;color:var(--text-secondary);font-family:'Sora',sans-serif;">
-            <div style="font-size:2.5rem;margin-bottom:0.75rem;">📭</div>
+            <div style="font-size:2.5rem;margin-bottom:0.75rem;"><span class="material-symbols-rounded">inbox</span></div>
             <div style="font-size:1rem;font-weight:500;">No hay actividad registrada aún</div>
         </div>
         """, unsafe_allow_html=True)
         return
 
     action_icons = {
-        "creó la tarea":      ("✅","#22c55e"),
-        "actualizó la tarea": ("✏️","#8b5cf6"),
-        "eliminó la tarea":   ("🗑️","#ef4444"),
-        "completó la tarea":  ("🎯","#22c55e"),
-        "reactivó la tarea":  ("↩️","#f59e0b"),
-        "creó el equipo":     ("👥","#3b82f6"),
-        "agregó":             ("➕","#0d9488"),
-        "removió":            ("✕","#ef4444"),
-        "movió":              ("↗️","#f59e0b"),
-        "cambió el rol":      ("🔄","#8b5cf6"),
-        "eliminó el equipo":  ("🗑️","#ef4444"),
+        "creó la tarea":      ('<span class="material-symbols-rounded">check_circle</span>',"#22c55e"),
+        "actualizó la tarea": ('<span class="material-symbols-rounded">edit</span>',"#8b5cf6"),
+        "eliminó la tarea":   ('<span class="material-symbols-rounded">delete</span>',"#ef4444"),
+        "completó la tarea":  ('<span class="material-symbols-rounded">target</span>',"#22c55e"),
+        "reactivó la tarea":  ('<span class="material-symbols-rounded">undo</span>',"#f59e0b"),
+        "creó el equipo":     ('<span class="material-symbols-rounded">group</span>',"#3b82f6"),
+        "agregó":             ('<span class="material-symbols-rounded">add</span>',"#0d9488"),
+        "removió":            ('<span class="material-symbols-rounded">close</span>',"#ef4444"),
+        "movió":              ('<span class="material-symbols-rounded">arrow_outward</span>',"#f59e0b"),
+        "cambió el rol":      ('<span class="material-symbols-rounded">refresh</span>',"#8b5cf6"),
+        "eliminó el equipo":  ('<span class="material-symbols-rounded">delete</span>',"#ef4444"),
     }
 
     for item in activity:
         action      = item.get("action","")
         icon, color = next(
             ((ic,co) for key,(ic,co) in action_icons.items() if key in action),
-            ("📌","#6b7280"),
+            ('<span class="material-symbols-rounded">push_pin</span>',"#6b7280"),
         )
         r,g,b   = _hex_to_rgb(color)
         entity  = item.get("entity_name","")
@@ -1564,40 +1767,40 @@ def render_activity_page() -> None:
 
 
 def render_config_page() -> None:
-    st.markdown('<div class="page-title">⚙️ Configuración</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-title"><span class="material-symbols-rounded">settings</span> Configuración</div>', unsafe_allow_html=True)
     st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
 
     user = st.session_state.get("auth_user")
     name, email_val = auth_user_display(user)
 
-    with st.expander("👤 Perfil", expanded=True):
+    with st.expander(":material/person: Perfil", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
             st.text_input("Nombre completo", value=name, key="config_name")
         with c2:
             st.text_input("Email", value=email_val, key="config_email", disabled=True)
-        if st.button("💾 Guardar Perfil", key="save_profile"):
-            st.success("✅ Perfil actualizado correctamente.")
+        if st.button("Guardar Perfil", icon=":material/save:", key="save_profile"):
+            st.success(":material/check_circle: Perfil actualizado correctamente.")
 
-    with st.expander("🔔 Notificaciones", expanded=True):
+    with st.expander(":material/notifications: Notificaciones", expanded=True):
         st.toggle("Notificaciones de tareas",    value=True,  key="notif_tasks")
         st.toggle("Recordatorios diarios",        value=True,  key="notif_daily")
         st.toggle("Actualizaciones de proyectos", value=False, key="notif_projects")
         st.toggle("Mensajes del equipo",          value=True,  key="notif_team")
-        if st.button("💾 Guardar Notificaciones", key="save_notifs"):
-            st.success("✅ Preferencias guardadas.")
+        if st.button("Guardar Notificaciones", icon=":material/save:", key="save_notifs"):
+            st.success(":material/check_circle: Preferencias guardadas.")
 
-    with st.expander("🎨 Apariencia", expanded=False):
+    with st.expander(":material/palette: Apariencia", expanded=False):
         def _apply_dark():
             st.session_state.dark_mode = st.session_state._cfg_dark
 
-        st.toggle("🌙 Modo Oscuro", value=st.session_state.dark_mode,
+        st.toggle(":material/dark_mode: Modo Oscuro", value=st.session_state.dark_mode,
                    key="_cfg_dark", on_change=_apply_dark)
         st.markdown(
             '<div class="config-hint">También puedes alternar el tema desde el panel lateral.</div>',
             unsafe_allow_html=True)
 
-    with st.expander("🗄️ Gestión de Datos", expanded=False):
+    with st.expander(":material/folder_open: Gestión de Datos", expanded=False):
         col_export, col_reset = st.columns(2)
         with col_export:
             st.download_button(
@@ -1608,19 +1811,19 @@ def render_config_page() -> None:
                 use_container_width=True,
             )
         with col_reset:
-            if st.button("🔄 Datos de ejemplo", key="reset_data", use_container_width=True):
+            if st.button("Datos de ejemplo", icon=":material/refresh:", key="reset_data", use_container_width=True):
                 from database import _exec
                 _exec("DELETE FROM tasks")
                 seed_sample_data()
                 st.session_state.tasks = db_load_tasks()
-                st.success("✅ Datos de ejemplo restaurados.")
+                st.success(":material/check_circle: Datos de ejemplo restaurados.")
                 st.rerun()
 
-    with st.expander("🔌 Base de Datos (Supabase)", expanded=False):
+    with st.expander(":material/power: Base de Datos (Supabase)", expanded=False):
         status_html = (
-            '<span style="color:#16a34a;font-weight:600;">✅ Conectado a Supabase</span>'
+            '<span style="color:#16a34a;font-weight:600;">:material/check_circle: Conectado a Supabase</span>'
             if st.session_state.db_ok
-            else '<span style="color:#ef4444;font-weight:600;">❌ Sin conexión</span>'
+            else '<span style="color:#ef4444;font-weight:600;">:material/cancel: Sin conexión</span>'
         )
         st.markdown(f"""
         <div class="config-info">
@@ -1630,7 +1833,7 @@ def render_config_page() -> None:
             <div><b>Usuario:</b> postgres</div>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("🔄 Reconectar", key="reconnect_db"):
+        if st.button("Reconectar", icon=":material/refresh:", key="reconnect_db"):
             st.cache_resource.clear()
             st.session_state.db_ok = False
             st.rerun()
@@ -1642,7 +1845,7 @@ def render_config_page() -> None:
             unsafe_allow_html=True,
         )
         st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-        if st.button("🚪 Cerrar sesión", key="config_logout", use_container_width=False):
+        if st.button("Cerrar sesión", icon=":material/logout:", key="config_logout", use_container_width=False):
             auth_logout()
             st.rerun()
 
@@ -1680,6 +1883,7 @@ def main() -> None:
     {
         "Dashboard":     render_dashboard,
         "Tareas":        render_tasks_page,
+        "Nueva Tarea":   render_new_task_page,
         "Calendario":    render_calendar_page,
         "Equipo":        render_team_page,
         "Recordatorios": render_reminders_page,
