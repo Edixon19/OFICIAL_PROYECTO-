@@ -129,37 +129,57 @@ def _exec(sql: str, params=(), fetch: str = "none"):
 #  TAREAS
 # ══════════════════════════════════════════════
 
-def db_load_tasks() -> list:
-    rows = _exec(
-        "SELECT * FROM tasks ORDER BY "
-        "CASE priority WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END, "
-        "created_at DESC",
-        fetch="all",
-    )
-    for r in rows:
-        if isinstance(r.get("tags"), str):
-            try:
-                r["tags"] = json.loads(r["tags"])
-            except Exception:
-                r["tags"] = []
-        elif r.get("tags") is None:
+def _normalize_task_row(r: dict) -> dict:
+    """Normaliza una fila de tarea (tags, fechas)."""
+    if isinstance(r.get("tags"), str):
+        try:
+            r["tags"] = json.loads(r["tags"])
+        except Exception:
             r["tags"] = []
-        if hasattr(r.get("due_date"), "isoformat"):
-            r["due_date"] = r["due_date"].isoformat()
-        if hasattr(r.get("created_at"), "isoformat"):
-            r["created_at"] = r["created_at"].isoformat()
-    return rows
+    elif r.get("tags") is None:
+        r["tags"] = []
+    if hasattr(r.get("due_date"), "isoformat"):
+        r["due_date"] = r["due_date"].isoformat()
+    if hasattr(r.get("created_at"), "isoformat"):
+        r["created_at"] = r["created_at"].isoformat()
+    return r
 
 
-def db_add_task(title, description, priority, category, status, due_date, assignee, tags) -> bool:
+def db_load_tasks(team_id=None) -> list:
+    """Carga tareas filtradas por equipo.
+    team_id=None  → tareas personales (team_id IS NULL) del usuario actual.
+    team_id=<uuid> → tareas del equipo indicado.
+    """
+    user_id = auth_user_id()
+    if team_id is None:
+        rows = _exec(
+            "SELECT * FROM tasks WHERE team_id IS NULL AND user_id = %s ORDER BY "
+            "CASE priority WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END, "
+            "created_at DESC",
+            (user_id,), fetch="all",
+        )
+    else:
+        rows = _exec(
+            "SELECT * FROM tasks WHERE team_id = %s ORDER BY "
+            "CASE priority WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END, "
+            "created_at DESC",
+            (team_id,), fetch="all",
+        )
+    return [_normalize_task_row(r) for r in rows]
+
+
+def db_add_task(title, description, priority, category, status, due_date,
+                assignee, tags, team_id=None) -> bool:
     task_id = str(uuid.uuid4())
     user_id = auth_user_id()
     ok = _exec(
         """INSERT INTO tasks (id,title,description,priority,category,status,
-           due_date,assignee,tags,created_at,user_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)""",
+           due_date,assignee,tags,created_at,user_id,team_id)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s)""",
         (task_id, title.strip(), description.strip(), priority, category, status,
          due_date.isoformat() if due_date else date.today().isoformat(),
-         assignee.strip(), json.dumps(tags, ensure_ascii=False), datetime.now().isoformat(), user_id),
+         assignee.strip(), json.dumps(tags, ensure_ascii=False),
+         datetime.now().isoformat(), user_id, team_id),
     )
     if ok:
         _log_activity(assignee.strip() or "Sistema", "creó la tarea", "tarea", title.strip())
@@ -199,13 +219,51 @@ def db_toggle_task_status(task_id: str, current_status: str, title: str = "") ->
 #  EQUIPOS
 # ══════════════════════════════════════════════
 
+def db_get_user_teams() -> list:
+    """Devuelve los equipos a los que pertenece el usuario actual.
+    Retorna lista de dicts con id y name.
+    """
+    user_id = auth_user_id()
+    if not user_id:
+        return []
+    return _exec(
+        "SELECT t.id, t.name FROM teams t "
+        "JOIN team_members tm ON t.id = tm.team_id "
+        "WHERE tm.user_id = %s "
+        "ORDER BY t.name",
+        (user_id,), fetch="all",
+    )
+
+
 def db_load_teams() -> list:
-    teams = _exec("SELECT * FROM teams ORDER BY created_at DESC", fetch="all")
+    """Carga solo los equipos a los que pertenece el usuario actual,
+    con sus miembros (incluyendo nombre obtenido de auth.users).
+    """
+    user_id = auth_user_id()
+    if not user_id:
+        return []
+    teams = _exec(
+        "SELECT t.* FROM teams t "
+        "JOIN team_members tm ON t.id = tm.team_id "
+        "WHERE tm.user_id = %s "
+        "ORDER BY t.created_at DESC",
+        (user_id,), fetch="all",
+    )
     for team in teams:
         if hasattr(team.get("created_at"), "isoformat"):
             team["created_at"] = team["created_at"].isoformat()
+        # Cargar miembros con nombre de auth.users
         members = _exec(
-            "SELECT * FROM team_members WHERE team_id = %s ORDER BY role",
+            "SELECT tm.id, tm.team_id, tm.user_id, tm.role, tm.joined_at, "
+            "       u.email, "
+            "       COALESCE(u.raw_user_meta_data->>'full_name', "
+            "                u.raw_user_meta_data->>'name', "
+            "                split_part(u.email, '@', 1)) AS member_name "
+            "FROM team_members tm "
+            "JOIN auth.users u ON tm.user_id = u.id "
+            "WHERE tm.team_id = %s "
+            "ORDER BY CASE tm.role WHEN 'Líder' THEN 0 WHEN 'Editor' THEN 1 "
+            "         WHEN 'Miembro' THEN 2 ELSE 3 END",
             (team["id"],), fetch="all",
         )
         for m in members:
@@ -215,24 +273,59 @@ def db_load_teams() -> list:
     return teams
 
 
-def db_create_team(name: str, description: str, leader_name: str) -> bool:
+def db_get_user_by_email(email: str) -> dict:
+    """Busca un usuario registrado por email. Retorna dict con id, email, nombre o {}."""
+    row = _exec(
+        "SELECT id, email, "
+        "       COALESCE(raw_user_meta_data->>'full_name', "
+        "                raw_user_meta_data->>'name', "
+        "                split_part(email, '@', 1)) AS display_name "
+        "FROM auth.users WHERE email = %s",
+        (email.strip().lower(),), fetch="one",
+    )
+    return row
+
+
+def db_create_team(name: str, description: str) -> bool:
+    """Crea un equipo y añade al usuario actual como Líder."""
     team_id = str(uuid.uuid4())
     user_id = auth_user_id()
     ok = _exec("INSERT INTO teams (id,name,description,user_id) VALUES (%s,%s,%s,%s)",
                (team_id, name.strip(), description.strip(), user_id))
-    if ok and leader_name.strip():
-        _exec("INSERT INTO team_members (id,team_id,member_name,role) VALUES (%s,%s,%s,%s)",
-              (str(uuid.uuid4()), team_id, leader_name.strip(), "Líder"))
-        _log_activity(leader_name, "creó el equipo", "equipo", name.strip())
-    return bool(ok)
-
-
-def db_add_member(team_id: str, member_name: str, role: str, team_name: str = "") -> bool:
-    ok = _exec("INSERT INTO team_members (id,team_id,member_name,role) VALUES (%s,%s,%s,%s)",
-               (str(uuid.uuid4()), team_id, member_name.strip(), role))
     if ok:
-        _log_activity("Usuario", f"agregó a {member_name} al equipo", "equipo", team_name)
+        # Auto-añadir al creador como Líder
+        _exec("INSERT INTO team_members (id,team_id,user_id,role) VALUES (%s,%s,%s,%s)",
+              (str(uuid.uuid4()), team_id, user_id, "Líder"))
+        _log_activity("Usuario", "creó el equipo", "equipo", name.strip())
     return bool(ok)
+
+
+def db_add_member(team_id: str, email: str, role: str, team_name: str = "") -> tuple:
+    """Añade un miembro al equipo por email.
+    Retorna (ok: bool, error_msg: str | None).
+    """
+    target = db_get_user_by_email(email)
+    if not target or not target.get("id"):
+        return False, "No se encontró un usuario registrado con ese correo."
+
+    target_user_id = str(target["id"])
+    display_name = target.get("display_name", email)
+
+    # Verificar si ya es miembro
+    existing = _exec(
+        "SELECT id FROM team_members WHERE team_id = %s AND user_id = %s",
+        (team_id, target_user_id), fetch="one",
+    )
+    if existing:
+        return False, f"{display_name} ya es miembro de este equipo."
+
+    ok = _exec(
+        "INSERT INTO team_members (id,team_id,user_id,role) VALUES (%s,%s,%s,%s)",
+        (str(uuid.uuid4()), team_id, target_user_id, role),
+    )
+    if ok:
+        _log_activity("Líder", f"agregó a {display_name} al equipo", "equipo", team_name)
+    return bool(ok), None
 
 
 def db_update_member_role(member_id: str, new_role: str, member_name: str = "") -> bool:
@@ -258,10 +351,21 @@ def db_remove_member(member_id: str, member_name: str = "", team_name: str = "")
 
 
 def db_delete_team(team_id: str, team_name: str = "") -> bool:
+    """Elimina un equipo. Solo el creador puede hacerlo (verificado en la UI)."""
     ok = _exec("DELETE FROM teams WHERE id = %s", (team_id,))
     if ok:
         _log_activity("Usuario", "eliminó el equipo", "equipo", team_name)
     return bool(ok)
+
+
+def db_is_team_owner(team_id: str) -> bool:
+    """Verifica si el usuario actual es el creador del equipo."""
+    user_id = auth_user_id()
+    if not user_id:
+        return False
+    row = _exec("SELECT id FROM teams WHERE id = %s AND user_id = %s",
+                (team_id, user_id), fetch="one")
+    return bool(row)
 
 
 # ══════════════════════════════════════════════
