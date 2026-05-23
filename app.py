@@ -61,7 +61,7 @@ st.set_page_config(
 # CONSTANTES
 # ─────────────────────────────────────────────
 PRIORITIES     = ["High", "Medium", "Low"]
-CATEGORIES     = ["Trabajo", "Personal", "Compras", "Diseño", "Desarrollo", "Otro"]
+CATEGORIES     = ["Trabajo", "Personal", "Compras", "Diseño", "Desarrollo", "Otro","Casa","Universidad","Fiestas"]
 STATUS_OPTIONS = ["Pendiente", "Activa", "Completada"]
 TEAM_ROLES     = ["Líder", "Miembro", "Editor", "Viewer"]
 
@@ -959,8 +959,20 @@ def render_task_card(task: dict) -> None:
     is_completed = task["status"] == "Completada"
     completed_class = " completed" if is_completed else ""
     tags_html    = " ".join(render_tag_badge(t) for t in task.get("tags", []))
+    assignee_name = task.get("assignee", "")
+    assignee_id = task.get("assignee_id")
+    if assignee_id:
+        found = False
+        for team in st.session_state.get("teams", []):
+            for m in team.get("members", []):
+                if str(m["user_id"]) == str(assignee_id):
+                    assignee_name = m["member_name"]
+                    found = True
+                    break
+            if found:
+                break
     due_str      = f'<span class="material-symbols-rounded" style="vertical-align: middle; font-size: inherit;">calendar_month</span> {task.get("due_date","")}' if task.get("due_date") else ""
-    asgn_str     = f'<span class="material-symbols-rounded" style="vertical-align: middle; font-size: inherit;">person</span> {task["assignee"]}'         if task.get("assignee") else ""
+    asgn_str     = f'<span class="material-symbols-rounded" style="vertical-align: middle; font-size: inherit;">person</span> {assignee_name}'         if assignee_name else ""
     meta_html    = " &nbsp;·&nbsp; ".join(p for p in [due_str, asgn_str] if p)
 
     # Use a keyed container so CSS can target it, with columns inside for layout
@@ -1024,8 +1036,47 @@ def render_edit_form(task: dict) -> None:
         nt  = st.text_input("Título *", value=task["title"], key=f"edit_title_{task['id']}")
         nd  = st.text_area("Descripción", value=task.get("description",""),
                             key=f"edit_desc_{task['id']}", height=80)
-        na  = st.text_input("Asignado a", value=task.get("assignee",""),
-                             key=f"edit_assignee_{task['id']}")
+        
+        active_team_id = st.session_state.get("active_team_id")
+        team_members = []
+        if active_team_id:
+            active_team = next((t for t in st.session_state.get("teams", []) if t["id"] == active_team_id), None)
+            if active_team:
+                team_members = active_team.get("members", [])
+
+        if active_team_id and team_members:
+            options = ["Sin asignar"] + [f"{m['member_name']} ({m['email']})" for m in team_members]
+            default_index = 0
+            task_assignee_id = task.get("assignee_id")
+            task_assignee_name = task.get("assignee")
+            if task_assignee_id:
+                for idx, m in enumerate(team_members):
+                    if str(m["user_id"]) == str(task_assignee_id):
+                        default_index = idx + 1
+                        break
+            elif task_assignee_name:
+                for idx, m in enumerate(team_members):
+                    if m["member_name"] == task_assignee_name:
+                        default_index = idx + 1
+                        break
+
+            selected_assignee = st.selectbox(
+                "Asignado a",
+                options,
+                index=default_index,
+                key=f"edit_assignee_sel_{task['id']}"
+            )
+            if selected_assignee == "Sin asignar":
+                na = ""
+                na_id = None
+            else:
+                m_selected = team_members[options.index(selected_assignee) - 1]
+                na = m_selected["member_name"]
+                na_id = m_selected["user_id"]
+        else:
+            na  = st.text_input("Asignado a", value=task.get("assignee",""),
+                                 key=f"edit_assignee_{task['id']}")
+            na_id = None
     with c2:
         np_ = st.selectbox("Prioridad", PRIORITIES,
                             index=PRIORITIES.index(task["priority"]) if task["priority"] in PRIORITIES else 0,
@@ -1053,6 +1104,7 @@ def render_edit_form(task: dict) -> None:
                 update_task(task["id"], title=nt.strip(), description=nd.strip(),
                             priority=np_, category=nc, status=ns,
                             due_date=ndate.isoformat(), assignee=na.strip(),
+                            assignee_id=na_id,
                             tags=[t.strip() for t in tags_str.split(",") if t.strip()])
                 st.session_state.editing_task_id = None
                 st.success(":material/check_circle: Tarea actualizada.")
@@ -1086,12 +1138,29 @@ def render_new_task_page() -> None:
 
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
+    active_team_id = st.session_state.get("active_team_id")
+    team_members = []
+    if active_team_id:
+        active_team = next((t for t in st.session_state.get("teams", []) if t["id"] == active_team_id), None)
+        if active_team:
+            team_members = active_team.get("members", [])
+
     c1, c2 = st.columns(2)
     with c1:
         title    = st.text_input("Título *", placeholder="¿Qué necesitas hacer?", key="new_title")
         
-        assignee = st.text_input("Asignado a", placeholder="Nombre del responsable",
-                                  key="new_assignee")
+        if active_team_id and team_members:
+            options = ["Sin asignar"] + [f"{m['member_name']} ({m['email']})" for m in team_members]
+            selected_assignee = st.selectbox("Asignado a", options, key="new_assignee_sel")
+            if selected_assignee == "Sin asignar":
+                assignee = ""
+                assignee_id = None
+            else:
+                m_selected = team_members[options.index(selected_assignee) - 1]
+                assignee = m_selected["member_name"]
+                assignee_id = m_selected["user_id"]
+
+
         priority = st.selectbox("Prioridad", PRIORITIES, key="new_priority",
                                 format_func=lambda x: {"High": "Alta", "Medium": "Media", "Low": "Baja"}.get(x, x))
     with c2:
@@ -1110,7 +1179,7 @@ def render_new_task_page() -> None:
                 st.error(":material/warning: El título es obligatorio.")
             else:
                 tags = [t.strip() for t in tags_input.split(",") if t.strip()]
-                add_task(title, desc, priority, category, status, due_date, assignee, tags)
+                add_task(title, desc, priority, category, status, due_date, assignee, tags, assignee_id=assignee_id)
                 st.session_state.active_page = "Tareas"
                 st.success(f":material/check_circle: Tarea '{title.strip()}' creada.")
                 st.rerun()
