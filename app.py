@@ -1086,22 +1086,23 @@ def render_new_task_page() -> None:
 
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="form-container">', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
         title    = st.text_input("Título *", placeholder="¿Qué necesitas hacer?", key="new_title")
-        desc     = st.text_area("Descripción", placeholder="Añade más detalles...",
-                                 key="new_desc", height=90)
+        
         assignee = st.text_input("Asignado a", placeholder="Nombre del responsable",
                                   key="new_assignee")
-    with c2:
         priority = st.selectbox("Prioridad", PRIORITIES, key="new_priority",
                                 format_func=lambda x: {"High": "Alta", "Medium": "Media", "Low": "Baja"}.get(x, x))
+    with c2:
+       
         category = st.selectbox("Categoría", CATEGORIES, key="new_category")
         status   = st.selectbox("Estado inicial", STATUS_OPTIONS, key="new_status")
         due_date = st.date_input("Fecha límite", value=date.today(), key="new_date")
     tags_input = st.text_input("Etiquetas (separadas por coma)",
                                 placeholder="ej: diseño, urgente", key="new_tags")
+    desc     = st.text_area("Descripción", placeholder="Añade más detalles...",
+                                 key="new_desc", height=90)
     cb, cc, _ = st.columns([1, 1, 4])
     with cb:
         if st.button("Crear Tarea", icon=":material/check_circle:", key="btn_create_task", use_container_width=True):
