@@ -61,7 +61,7 @@ st.set_page_config(
 # CONSTANTES
 # ─────────────────────────────────────────────
 PRIORITIES     = ["High", "Medium", "Low"]
-CATEGORIES     = ["Trabajo", "Personal", "Compras", "Diseño", "Desarrollo", "Otro","Casa","Universidad","Fiestas"]
+CATEGORIES     = ["Trabajo", "Personal", "Compras", "Diseño", "Desarrollo", "Otro", "Casa", "Universidad", "Fiestas"]
 STATUS_OPTIONS = ["Pendiente", "Activa", "Completada"]
 TEAM_ROLES     = ["Líder", "Miembro", "Editor", "Viewer"]
 
@@ -69,6 +69,7 @@ PRIORITY_COLORS = {"High": "#ef4444", "Medium": "#f59e0b", "Low": "#22c55e"}
 CATEGORY_COLORS = {
     "Trabajo": "#3b82f6", "Personal": "#8b5cf6", "Compras": "#f59e0b",
     "Diseño": "#ec4899", "Desarrollo": "#06b6d4", "Otro": "#6b7280",
+    "Casa": "#94a3b8", "Universidad": "#10b981", "Fiestas": "#f59e0b"
 }
 
 # ── Temas ─────────────────────────────────────

@@ -142,6 +142,8 @@ def _normalize_task_row(r: dict) -> dict:
         r["due_date"] = r["due_date"].isoformat()
     if hasattr(r.get("created_at"), "isoformat"):
         r["created_at"] = r["created_at"].isoformat()
+    if r.get("assignee_id") is not None:
+        r["assignee_id"] = str(r["assignee_id"])
     return r
 
 
@@ -169,17 +171,17 @@ def db_load_tasks(team_id=None) -> list:
 
 
 def db_add_task(title, description, priority, category, status, due_date,
-                assignee, tags, team_id=None) -> bool:
+                assignee, tags, team_id=None, assignee_id=None) -> bool:
     task_id = str(uuid.uuid4())
     user_id = auth_user_id()
     ok = _exec(
         """INSERT INTO tasks (id,title,description,priority,category,status,
-           due_date,assignee,tags,created_at,user_id,team_id)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s)""",
+           due_date,assignee,tags,created_at,user_id,team_id,assignee_id)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s)""",
         (task_id, title.strip(), description.strip(), priority, category, status,
          due_date.isoformat() if due_date else date.today().isoformat(),
          assignee.strip(), json.dumps(tags, ensure_ascii=False),
-         datetime.now().isoformat(), user_id, team_id),
+         datetime.now().isoformat(), user_id, team_id, assignee_id),
     )
     if ok:
         _log_activity(assignee.strip() or "Sistema", "creó la tarea", "tarea", title.strip())

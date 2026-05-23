@@ -5,6 +5,7 @@ Maneja: Email/Password · Google OAuth · Registro · Recuperación de contrase�
 v3.4 — Fix URL OAuth (sin doble codificación)
 """
 
+from pandas.core import window
 import streamlit as st
 from supabase import create_client, Client
 
@@ -162,6 +163,8 @@ html, body { font-family: 'Sora', sans-serif !important; }
     min-height: 100vh !important;
 }
 
+ 
+
 section[data-testid="stSidebar"],
 header[data-testid="stHeader"],
 [data-testid="collapsedControl"],
@@ -173,9 +176,20 @@ header[data-testid="stHeader"],
 }
 
 .main .block-container {
-    padding: 4vh 1rem 2rem !important;
-    max-width: 440px !important;
-    margin: 0 auto !important;
+    padding: 4vh 2rem 2rem !important;
+}
+
+.auth-card {
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,0.55);
+    border-radius: 20px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.10), 0 1.5px 6px rgba(0,0,0,0.06);
+    padding: 2.4rem 2rem 2rem;
+    max-width: 400px;
+    width: 100%;
+    margin: 0 auto;
 }
 
 .main p,
@@ -301,6 +315,11 @@ div[data-testid="stWarning"] span {
 .st-key-auth_back_login button:hover {
     color: #c94d22 !important;
     transform: none !important;
+}
+
+.st-key-auth_to_forgot {
+    display: flex !important;
+    justify-content: center !important;
 }
 
 .auth-divider {
@@ -490,7 +509,9 @@ def _render_login():
     st.markdown(_logo("GestorPro", "Bienvenido de vuelta"), unsafe_allow_html=True)
 
     email    = st.text_input("Correo electrónico", placeholder="tu@email.com", key="login_email")
-    password = st.text_input("Contraseña", placeholder="••••••••", key="login_pass", type="password")
+    password = st.text_input(
+        "Contraseña", placeholder="••••••••", key="login_pass", type="password"
+    )
 
     col_rem, col_forgot = st.columns([3, 2])
     with col_rem:
@@ -533,7 +554,7 @@ def _render_login():
     with col_txt:
         _small_text("¿No tienes una cuenta?")
     with col_btn:
-        if st.button("Regístrate aquí", key="auth_to_register"):
+        if st.button("Regístrate aquí", key="auth_to_register", use_container_width=True):
             st.session_state.auth_page = "register"
             st.rerun()
 
@@ -669,4 +690,7 @@ def render_auth():
         "forgot":   _render_forgot,
     }
 
-    dispatch.get(st.session_state.auth_page, _render_login)()
+    # Center the card using columns and wrap content in the auth-card div
+    _, col, _ = st.columns([1, 2, 1])
+    with col:
+         dispatch.get(st.session_state.auth_page, _render_login)()
