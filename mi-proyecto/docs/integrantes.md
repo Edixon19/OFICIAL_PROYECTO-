@@ -6,9 +6,13 @@ GestorPro fue desarrollado por el equipo del **Segundo Semestre de UTEDÉ**.
 
 ## 🧑‍💻 Equipo de Desarrollo
 
-| Nombre | Rol en el proyecto | GitHub |
-|---|---|---|
-| **Edixon** | Desarrollador principal · Arquitecto de la aplicación | [@Edixon19](https://github.com/Edixon19) |
+| Nombre | Rol en el proyecto |
+|---|---|
+| **Adrian Felipe Benavides** | Desarrollador |
+| **Claudia Katherine Salcedo Bolaños** | Desarrolladora |
+| **Edixon Aldair Diaz Muñoz** | Desarrollador | 
+| **Leider Jesus Escobar** | Desarrollador |
+| **Ricardo Ceron Chaves** | Desarrollador | 
 
 ---
 
