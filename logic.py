@@ -27,11 +27,11 @@ from database import (
 # ══════════════════════════════════════════════
 
 def add_task(title, description, priority, category, status, due_date, assignee, tags,
-             team_id=None) -> None:
+             team_id=None, assignee_id=None) -> None:
     # Usa el equipo activo de la sesión si no se especifica
     if team_id is None:
         team_id = st.session_state.get("active_team_id")
-    if db_add_task(title, description, priority, category, status, due_date, assignee, tags, team_id):
+    if db_add_task(title, description, priority, category, status, due_date, assignee, tags, team_id, assignee_id):
         st.session_state.tasks = db_load_tasks(team_id=team_id)
 
 

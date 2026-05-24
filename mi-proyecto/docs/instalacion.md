@@ -114,6 +114,7 @@ CREATE TABLE activity_log (
     entity_type TEXT,
     entity_name TEXT,
     detail      TEXT,
+    user_id     TEXT,
     created_at  TIMESTAMP DEFAULT now()
 );
 ```
